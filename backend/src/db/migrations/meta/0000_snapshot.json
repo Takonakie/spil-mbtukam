@@ -1,0 +1,502 @@
+{
+  "id": "0287cf05-dc8f-41ca-a43b-581c2dacf2c3",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "5",
+  "dialect": "pg",
+  "tables": {
+    "analysis_summary": {
+      "name": "analysis_summary",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "interview_id": {
+          "name": "interview_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dominant_emotion": {
+          "name": "dominant_emotion",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "emotion_stability_score": {
+          "name": "emotion_stability_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "avg_pitch_hz": {
+          "name": "avg_pitch_hz",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pitch_variation": {
+          "name": "pitch_variation",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "speaking_rate_wpm": {
+          "name": "speaking_rate_wpm",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "filler_count": {
+          "name": "filler_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "filler_percentage": {
+          "name": "filler_percentage",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mbti_type": {
+          "name": "mbti_type",
+          "type": "varchar(4)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "overall_score": {
+          "name": "overall_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "recommendations": {
+          "name": "recommendations",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "analysis_summary_interview_id_interviews_id_fk": {
+          "name": "analysis_summary_interview_id_interviews_id_fk",
+          "tableFrom": "analysis_summary",
+          "tableTo": "interviews",
+          "columnsFrom": [
+            "interview_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "expression_results": {
+      "name": "expression_results",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "interview_id": {
+          "name": "interview_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timestamp_sec": {
+          "name": "timestamp_sec",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "emotion": {
+          "name": "emotion",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confidence": {
+          "name": "confidence",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "expression_results_interview_id_interviews_id_fk": {
+          "name": "expression_results_interview_id_interviews_id_fk",
+          "tableFrom": "expression_results",
+          "tableTo": "interviews",
+          "columnsFrom": [
+            "interview_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "interviews": {
+      "name": "interviews",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "candidate_name": {
+          "name": "candidate_name",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "candidate_type": {
+          "name": "candidate_type",
+          "type": "candidate_type",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "video_url": {
+          "name": "video_url",
+          "type": "varchar(1024)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "audio_url": {
+          "name": "audio_url",
+          "type": "varchar(1024)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "duration_seconds": {
+          "name": "duration_seconds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "status",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'uploaded'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "mbti_results": {
+      "name": "mbti_results",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "interview_id": {
+          "name": "interview_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "predicted_type": {
+          "name": "predicted_type",
+          "type": "varchar(4)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "e_score": {
+          "name": "e_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "i_score": {
+          "name": "i_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "s_score": {
+          "name": "s_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_score": {
+          "name": "n_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "t_score": {
+          "name": "t_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "f_score": {
+          "name": "f_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "j_score": {
+          "name": "j_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "p_score": {
+          "name": "p_score",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confidence": {
+          "name": "confidence",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reasoning": {
+          "name": "reasoning",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "mbti_results_interview_id_interviews_id_fk": {
+          "name": "mbti_results_interview_id_interviews_id_fk",
+          "tableFrom": "mbti_results",
+          "tableTo": "interviews",
+          "columnsFrom": [
+            "interview_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "transcript_segments": {
+      "name": "transcript_segments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "interview_id": {
+          "name": "interview_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "start_time": {
+          "name": "start_time",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_time": {
+          "name": "end_time",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "is_filler": {
+          "name": "is_filler",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "filler_type": {
+          "name": "filler_type",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "transcript_segments_interview_id_interviews_id_fk": {
+          "name": "transcript_segments_interview_id_interviews_id_fk",
+          "tableFrom": "transcript_segments",
+          "tableTo": "interviews",
+          "columnsFrom": [
+            "interview_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "voice_results": {
+      "name": "voice_results",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "interview_id": {
+          "name": "interview_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "timestamp_sec": {
+          "name": "timestamp_sec",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pitch_hz": {
+          "name": "pitch_hz",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "intensity_db": {
+          "name": "intensity_db",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "jitter": {
+          "name": "jitter",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "shimmer": {
+          "name": "shimmer",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hnr": {
+          "name": "hnr",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "audio_emotion": {
+          "name": "audio_emotion",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "voice_results_interview_id_interviews_id_fk": {
+          "name": "voice_results_interview_id_interviews_id_fk",
+          "tableFrom": "voice_results",
+          "tableTo": "interviews",
+          "columnsFrom": [
+            "interview_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    }
+  },
+  "enums": {
+    "candidate_type": {
+      "name": "candidate_type",
+      "values": {
+        "intern": "intern",
+        "employee": "employee"
+      }
+    },
+    "status": {
+      "name": "status",
+      "values": {
+        "uploaded": "uploaded",
+        "processing": "processing",
+        "completed": "completed",
+        "failed": "failed"
+      }
+    }
+  },
+  "schemas": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}
