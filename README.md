@@ -9,7 +9,7 @@ Aplikasi analisis interview multimodal untuk mengekstrak ekspresi wajah, kualita
 Pastikan dependensi berikut terinstal di komputer Anda:
 1. **Node.js & npm** (Atau **Bun** jika ingin kecepatan optimal. Panduan ini menggunakan Bun karena ia adalah runtime default yang telah dikonfigurasi).
 2. **Python 3.12+**
-3. **PostgreSQL** (Berjalan secara native pada port `5432` dengan password `123Gagah_`).
+3. **PostgreSQL** (Berjalan secara native pada port `5432` dengan password `your_password_here`).
 4. **FFmpeg** (Opsional, untuk ekstraksi audio otomatis lokal. Jika tidak ada, sistem akan otomatis menggunakan fallback video path langsung ke AI service).
 
 ---
@@ -24,8 +24,9 @@ ElysiaJS berfungsi sebagai API Gateway utama yang menerima upload video, mengelo
 
 Di terminal pertama, jalankan perintah berikut:
 ```bash
-cd d:\expression\backend
-C:\Users\ACER\.bun\bin\bun.exe run dev
+cd backend
+bun install
+bun run dev
 ```
 *Server backend akan berjalan di: **`http://localhost:3001`***
 
@@ -35,10 +36,23 @@ C:\Users\ACER\.bun\bin\bun.exe run dev
 
 FastAPI menginang semua model pemrosesan AI (DeepFace, OpenAI Whisper, Praat parselmouth, YAMNet/Wav2Vec, dan MBTI Estimation Engine).
 
-Di terminal kedua, jalankan perintah berikut:
-```bash
-cd d:\expression\ai-services
+Di terminal kedua, jalankan perintah berikut untuk membuat virtual environment, menginstal dependensi, dan menjalankan server:
+
+**Di Windows (PowerShell/CMD):**
+```powershell
+cd ai-services
+python -m venv venv
+venv\Scripts\pip install -r requirements.txt
 venv\Scripts\python -m uvicorn services.main:app --host 127.0.0.1 --port 8000
+```
+
+**Di macOS / Linux:**
+```bash
+cd ai-services
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn services.main:app --host 127.0.0.1 --port 8000
 ```
 *Server AI microservices akan berjalan di: **`http://localhost:8000`***
 
@@ -50,8 +64,9 @@ Dashboard UI interaktif untuk melakukan drag & drop upload video interview kandi
 
 Di terminal ketiga, jalankan perintah berikut:
 ```bash
-cd d:\expression\frontend
-C:\Users\ACER\.bun\bin\bun.exe run dev
+cd frontend
+bun install
+bun run dev
 ```
 *Frontend akan berjalan di: **`http://localhost:5173`*** (atau port dinamis berikutnya yang ditampilkan di layar).
 
@@ -63,18 +78,19 @@ Jika Anda melakukan perubahan pada skema database (`backend/src/db/schema.ts`):
 
 - **Menghasilkan file SQL migrasi baru**:
   ```bash
-  cd d:\expression\backend
-  C:\Users\ACER\.bun\bin\bun.exe x drizzle-kit generate:pg
+  cd backend
+  bun run db:generate
   ```
 
 - **Mendorong perubahan skema langsung ke PostgreSQL**:
   ```bash
-  cd d:\expression\backend
-  C:\Users\ACER\.bun\bin\bun.exe x drizzle-kit push:pg
+  cd backend
+  bun run db:push
   ```
 
 - **Membuka Drizzle Studio (UI Database Inspector)**:
   ```bash
-  cd d:\expression\backend
-  C:\Users\ACER\.bun\bin\bun.exe x drizzle-kit studio
+  cd backend
+  bun run db:studio
   ```
+

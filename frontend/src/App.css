@@ -513,3 +513,32 @@
   50% { opacity: 1; transform: scale(1.1); }
   100% { opacity: 0.6; transform: scale(1); }
 }
+
+/* Print/PDF Export Styling */
+@media print {
+  body, html {
+    background: #0b0c10 !important;
+    color: #fff !important;
+  }
+  .header, .sidebar, .btn, .timeline-tabs, button, input, select, .dropzone {
+    display: none !important;
+  }
+  .main-content {
+    grid-template-columns: 1fr !important;
+    height: auto !important;
+  }
+  .detail-pane {
+    padding: 0 !important;
+    overflow-y: visible !important;
+    gap: 20px !important;
+  }
+  .glass {
+    background: rgba(11, 12, 16, 0.6) !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    box-shadow: none !important;
+  }
+  .timeline-content-pane {
+    max-height: none !important;
+    overflow-y: visible !important;
+  }
+}

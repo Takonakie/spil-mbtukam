@@ -71,32 +71,6 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       })
     ]) as [any[], any[], any];
 
-    // Call Dialogue Flow Classification using LLM (Gemini)
-    console.log('🗣️ Calling Dialogue Flow Classification (Pewawancara vs Pelamar)...');
-    let dialogueRes = { segments: [] as any[] };
-    if (transRes.length > 0) {
-      try {
-        const mappedSegments = transRes.map((item, index) => ({
-          index,
-          text: item.text
-        }));
-        
-        const diagFetch = await fetch(`${AI_SERVICE_BASE_URL}/analyze/dialogue`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ segments: mappedSegments })
-        });
-        
-        if (diagFetch.ok) {
-          dialogueRes = await diagFetch.json() as { segments: any[] };
-        } else {
-          console.warn(`⚠️ Dialogue flow classifier returned status ${diagFetch.status}`);
-        }
-      } catch (e) {
-        console.error('❌ Dialogue flow classifier failed, falling back to heuristics:', e);
-      }
-    }
-
     console.log('💾 Saving AI analysis results to PostgreSQL...');
 
     // 4. Save results to respective tables
@@ -114,7 +88,6 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
     if (transRes.length > 0) {
       await db.insert(transcriptSegmentsTable).values(
         transRes.map((item, index) => {
-          const diagInfo = dialogueRes.segments.find((d: any) => d.index === index);
           return {
             interviewId,
             startTime: item.start_time,
@@ -122,8 +95,8 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
             text: item.text,
             isFiller: item.is_filler,
             fillerType: item.filler_type,
-            speaker: diagInfo?.speaker || 'candidate',
-            speechAct: diagInfo?.speech_act || 'statement'
+            speaker: 'candidate',
+            speechAct: 'statement'
           };
         })
       );
@@ -211,15 +184,26 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       ? roundToTwo(Math.sqrt(validPitches.reduce((acc: number, cur: any) => acc + Math.pow(cur.pitch_hz - avgPitchHz, 2), 0) / (validPitches.length - 1)))
       : 0;
 
-    // Fluency & Fillers (Candidate speech segments only to ignore interviewer questions)
-    const candidateSegments = transRes.filter((seg, index) => {
-      const diagInfo = dialogueRes.segments.find((d: any) => d.index === index);
-      return !diagInfo || diagInfo.speaker === 'candidate';
+    // Fluency & Fillers (Use all segments as the detection object)
+    const candidateSegments = transRes;
+
+    const indonesianFillers = ["anu", "ehm", "ehh", "umm", "hmm", "gitu", "kayak", "jadi", "ya kan", "tuh", "nah", "kan", "sih", "kok", "deh"];
+    const englishFillers = ["um", "uh", "like", "you know", "basically", "actually", "literally", "so", "right", "well"];
+    const allFillers = [...indonesianFillers, ...englishFillers];
+
+    let fillerCount = 0;
+    candidateSegments.forEach(seg => {
+      const textLower = (seg.text || "").toLowerCase();
+      allFillers.forEach(filler => {
+        const regex = new RegExp(`\\b${filler.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'g');
+        const matches = textLower.match(regex);
+        if (matches) {
+          fillerCount += matches.length;
+        }
+      });
     });
 
-    const fillerSegments = candidateSegments.filter(seg => seg.is_filler);
-    const fillerCount = fillerSegments.length;
-    const totalWordsCount = candidateSegments.reduce((acc, cur) => acc + cur.text.split(' ').length, 0);
+    const totalWordsCount = candidateSegments.reduce((acc, cur) => acc + (cur.text || '').split(/\s+/).filter(Boolean).length, 0);
     const fillerPercentage = totalWordsCount > 0
       ? roundToTwo((fillerCount / totalWordsCount) * 100)
       : 0;
@@ -295,36 +279,6 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       (confidenceScore * wConfidence)
     );
 
-    // Auto-generated recommendations
-    const recommendations = [];
-    if (fillerPercentage > (candidateType === 'intern' ? 10 : 6)) {
-      recommendations.push(`Penggunaan filler words cukup tinggi (${fillerPercentage.toFixed(1)}%). Latih kesadaran berbicara untuk memberikan hening jeda (pause) sejenak daripada menyisipkan filler.`);
-    } else {
-      recommendations.push("Kelancaran berbicara sangat baik dengan tingkat disfluensi/filler yang rendah.");
-    }
-
-    // Custom speaking rate limits
-    const minWpm = candidateType === 'intern' ? 100 : 115;
-    const maxWpm = candidateType === 'intern' ? 150 : 135;
-
-    if (speakingRateWpm > maxWpm) {
-      recommendations.push(`Tempo bicara Anda terlalu cepat (${speakingRateWpm.toFixed(0)} WPM, melebihi batas ideal ${maxWpm} WPM untuk ${candidateType === 'intern' ? 'Magang' : 'Karyawan'}). Cobalah memperlambat agar materi wawancara tersampaikan dengan matang.`);
-    } else if (speakingRateWpm < minWpm && speakingRateWpm > 0) {
-      recommendations.push(`Tempo bicara tergolong lambat (${speakingRateWpm.toFixed(0)} WPM, di bawah batas ideal ${minWpm} WPM). Anda bisa menaikkan antusiasme vokal agar komunikasi terasa dinamis.`);
-    } else {
-      recommendations.push(`Kecepatan tempo bicara ideal (${speakingRateWpm.toFixed(0)} WPM), sangat baik untuk mempermudah pemahaman interviewer.`);
-    }
-
-    if (jitter > 0.02) {
-      recommendations.push("Terdeteksi sedikit ketidakstabilan vokal (jitter tinggi). Latih pernapasan diafragma untuk menunjang suara vokal yang bulat dan mantap.");
-    }
-
-    if (dominantEmotion === 'angry' || dominantEmotion === 'sad') {
-      recommendations.push("Ekspresi dominan Anda terkesan tegang atau kurang ramah. Cobalah melatih senyum mikro (micro-smiles) agar terlihat lebih terbuka.");
-    }
-
-    recommendations.push(`Saran Komunikasi (${mbtiRes.predicted_type}): Sebagai kandidat dengan tipe estimasi ${mbtiRes.predicted_type}, tonjolkan ${mbtiRes.predicted_type.includes('E') ? 'antusiasme alami Anda dengan tetap mendengarkan secara aktif' : 'analisis mendalam Anda dengan penyampaian vokal yang lebih bertenaga'}.`);
-
     // 8. Save Analysis Summary
     await db.insert(analysisSummaryTable).values({
       interviewId,
@@ -337,7 +291,8 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       fillerPercentage,
       mbtiType: mbtiRes.predicted_type,
       overallScore,
-      recommendations: mbtiRes.recommendations || recommendations
+      recommendations: [],
+      executiveSummary: mbtiRes.executive_summary
     });
 
     // 9. Update status to 'completed'

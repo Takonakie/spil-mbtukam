@@ -83,7 +83,8 @@ export const analysisSummaryTable = pgTable('analysis_summary', {
   fillerPercentage: doublePrecision('filler_percentage'),
   mbtiType: varchar('mbti_type', { length: 4 }),
   overallScore: doublePrecision('overall_score'),
-  recommendations: jsonb('recommendations')
+  recommendations: jsonb('recommendations'),
+  executiveSummary: text('executive_summary')
 });
 
 // Relations

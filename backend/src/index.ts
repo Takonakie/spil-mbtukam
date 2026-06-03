@@ -11,7 +11,7 @@ import {
   mbtiResultsTable 
 } from './db/schema.ts';
 import { eq, desc } from 'drizzle-orm';
-import { ensureUploadDirectories, VIDEOS_DIR } from './utils/storage.ts';
+import { ensureUploadDirectories, VIDEOS_DIR, AUDIOS_DIR } from './utils/storage.ts';
 import { processInterviewPipeline } from './utils/pipeline.ts';
 
 // Initialize storage directories
@@ -86,8 +86,11 @@ const app = new Elysia()
           .where(eq(analysisSummaryTable.interviewId, interview.id))
           .limit(1);
           
+        const videoFilename = interview.videoUrl.split(/[/\\]/).pop();
+        const videoWebUrl = videoFilename ? `http://localhost:3001/api/files/videos/${videoFilename}` : null;
         return {
           ...interview,
+          videoWebUrl,
           overallScore: summary?.overallScore || null,
           dominantEmotion: summary?.dominantEmotion || null,
           mbtiType: summary?.mbtiType || null
@@ -125,8 +128,11 @@ const app = new Elysia()
         .where(eq(mbtiResultsTable.interviewId, id))
         .limit(1);
         
+      const videoFilename = interview.videoUrl.split(/[/\\]/).pop();
+      const videoWebUrl = videoFilename ? `http://localhost:3001/api/files/videos/${videoFilename}` : null;
       return {
         ...interview,
+        videoWebUrl,
         summary: summary || null,
         mbti: mbti || null
       };
@@ -206,6 +212,14 @@ const app = new Elysia()
       set.status = 500;
       return { error: error.message };
     }
+  })
+  
+  // Serve uploaded video and audio files statically
+  .get('/api/files/videos/:filename', ({ params }) => {
+    return Bun.file(join(VIDEOS_DIR, params.filename));
+  })
+  .get('/api/files/audios/:filename', ({ params }) => {
+    return Bun.file(join(AUDIOS_DIR, params.filename));
   })
   
   .listen(3001);

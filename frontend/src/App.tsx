@@ -14,6 +14,7 @@ interface Candidate {
 
 interface InterviewDetail extends Candidate {
   videoUrl: string;
+  videoWebUrl?: string;
   audioUrl: string | null;
   durationSeconds: number | null;
   summary: {
@@ -27,6 +28,7 @@ interface InterviewDetail extends Candidate {
     mbtiType: string;
     overallScore: number;
     recommendations: string[];
+    executiveSummary?: string;
   } | null;
   mbti: {
     predictedType: string;
@@ -101,6 +103,14 @@ export default function App() {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<any>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  const handleSeek = (time: number) => {
+    if (videoRef.current) {
+      videoRef.current.currentTime = time;
+      videoRef.current.play().catch(() => {});
+    }
+  };
 
   // 1. Fetch Candidates List
   const fetchCandidates = async () => {
@@ -442,7 +452,14 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '12px' }}>
+                          <div style={{ display: 'flex', gap: '12px' }}>
+                  <button 
+                    className="btn" 
+                    style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#3b82f6', boxShadow: 'none' }}
+                    onClick={() => window.print()}
+                  >
+                    🖨️ Cetak PDF
+                  </button>
                   <button 
                     className="btn" 
                     style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', boxShadow: 'none' }}
@@ -509,6 +526,30 @@ export default function App() {
               ) : (
                 /* Completed State Full Dashboard Display */
                 <>
+                  {/* Video Player & Executive Summary Section */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px' }}>
+                    {/* Interactive Video Player */}
+                    {detail.videoWebUrl && (
+                      <div className="glass" style={{ padding: '16px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <h3 className="section-title" style={{ color: '#fff', fontSize: '15px', marginBottom: 0 }}>Video Wawancara</h3>
+                        <video 
+                          ref={videoRef}
+                          src={detail.videoWebUrl}
+                          controls
+                          style={{ width: '100%', borderRadius: '8px', border: '1px solid var(--border-color)', maxHeight: '320px', background: '#000' }}
+                        />
+                      </div>
+                    )}
+                    
+                    {/* Executive Summary Card */}
+                    <div className="glass" style={{ padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      <h3 className="section-title" style={{ color: '#fff', fontSize: '15px', marginBottom: 0 }}>Executive Summary</h3>
+                      <p style={{ fontSize: '14px', lineHeight: '1.6', color: '#f3f4f6', margin: 0 }}>
+                        {detail.summary?.executiveSummary || "Rangkuman analisis belum dihasilkan untuk kandidat ini."}
+                      </p>
+                    </div>
+                  </div>
+
                   {/* Summary Metric Cards */}
                   <div className="metrics-row">
                     <div className="glass metric-card overall-score-glow">
@@ -680,36 +721,35 @@ export default function App() {
                             <p style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>Tidak ada data transkrip.</p>
                           ) : (
                             transcripts.map((seg) => {
-                              const isInterviewer = seg.speaker === 'interviewer';
-                              
                               // Helper to highlight filler words inside a sentence
-                              const renderTextWithHighlights = (text: string, fillerType: string | null) => {
-                                if (!fillerType) return text;
-                                const parts = text.split(new RegExp(`(${fillerType})`, 'gi'));
-                                return parts.map((part, index) => 
-                                  part.toLowerCase() === fillerType.toLowerCase() 
-                                    ? <span key={index} className="filler-highlight" style={{
-                                        background: 'rgba(239, 68, 68, 0.25)',
-                                        color: '#ef4444',
-                                        border: '1px dashed #ef4444',
-                                        padding: '1px 5px',
-                                        borderRadius: '4px',
-                                        fontWeight: 'bold',
-                                        fontSize: '13px'
-                                      }}>"{part}" ({fillerType})</span>
-                                    : part
-                                );
-                              };
-
-                              const getSpeechActBadge = (act?: string) => {
-                                switch (act) {
-                                  case 'question':
-                                    return <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 'bold', background: 'rgba(139, 92, 246, 0.2)', color: '#c084fc', border: '1px solid rgba(139, 92, 246, 0.3)' }}>❓ Tanya</span>;
-                                  case 'answer':
-                                    return <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 'bold', background: 'rgba(16, 185, 129, 0.2)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.3)' }}>💬 Jawab</span>;
-                                  default:
-                                    return <span style={{ padding: '2px 8px', borderRadius: '12px', fontSize: '10px', fontWeight: 'bold', background: 'rgba(107, 114, 128, 0.2)', color: '#9ca3af', border: '1px solid rgba(107, 114, 128, 0.3)' }}>📝 Pernyataan</span>;
-                                }
+                              const renderTextWithHighlights = (text: string) => {
+                                const indonesianFillers = ["anu", "ehm", "ehh", "umm", "hmm", "gitu", "kayak", "jadi", "ya kan", "tuh", "nah", "kan", "sih", "kok", "deh"];
+                                const englishFillers = ["um", "uh", "like", "you know", "basically", "actually", "literally", "so", "right", "well"];
+                                const allFillers = [...indonesianFillers, ...englishFillers];
+                                
+                                // Sort by length descending to match longer phrases first
+                                const sortedFillers = allFillers.sort((a, b) => b.length - a.length);
+                                
+                                const pattern = sortedFillers.map(f => `\\b${f.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`).join('|');
+                                const regex = new RegExp(`(${pattern})`, 'gi');
+                                
+                                const parts = text.split(regex);
+                                return parts.map((part, index) => {
+                                  const isFillerWord = sortedFillers.some(f => f.toLowerCase() === part.toLowerCase());
+                                  return isFillerWord ? (
+                                    <span key={index} className="filler-highlight" style={{
+                                      background: 'rgba(239, 68, 68, 0.25)',
+                                      color: '#ef4444',
+                                      border: '1px dashed #ef4444',
+                                      padding: '1px 5px',
+                                      borderRadius: '4px',
+                                      fontWeight: 'bold',
+                                      fontSize: '13px'
+                                    }}>
+                                      {part}
+                                    </span>
+                                  ) : part;
+                                });
                               };
 
                               return (
@@ -718,11 +758,11 @@ export default function App() {
                                   style={{
                                     display: 'flex',
                                     flexDirection: 'column',
-                                    alignItems: isInterviewer ? 'flex-start' : 'flex-end',
+                                    alignItems: 'flex-start',
                                     width: '100%'
                                   }}
                                 >
-                                  {/* Speaker tag + Speech Act + Timestamp */}
+                                  {/* Speaker tag + Timestamp */}
                                   <div style={{
                                     display: 'flex',
                                     alignItems: 'center',
@@ -731,10 +771,9 @@ export default function App() {
                                     fontSize: '11px',
                                     color: 'var(--text-secondary)'
                                   }}>
-                                    <span style={{ fontWeight: 700, color: isInterviewer ? '#a78bfa' : '#22d3ee' }}>
-                                      {isInterviewer ? '👨‍🏫 Interviewer' : `👤 Kandidat (${detail?.candidateName || 'Pelamar'})`}
+                                    <span style={{ fontWeight: 700, color: '#22d3ee' }}>
+                                      👤 {detail?.candidateName || 'Pelamar'}
                                     </span>
-                                    {getSpeechActBadge(seg.speechAct)}
                                     <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
                                       ({seg.startTime.toFixed(1)}s - {seg.endTime.toFixed(1)}s)
                                     </span>
@@ -743,18 +782,21 @@ export default function App() {
                                   {/* Glassmorphic Chat Bubble */}
                                   <div 
                                     className="glass" 
+                                    onClick={() => handleSeek(seg.startTime)}
                                     style={{
-                                      maxWidth: '80%',
+                                      maxWidth: '100%',
+                                      width: '100%',
                                       padding: '12px 16px',
-                                      borderRadius: isInterviewer ? '4px 16px 16px 16px' : '16px 4px 16px 16px',
-                                      border: isInterviewer ? '1px solid rgba(167, 139, 250, 0.2)' : '1px solid rgba(34, 211, 238, 0.3)',
-                                      background: isInterviewer ? 'rgba(167, 139, 250, 0.05)' : 'rgba(34, 211, 238, 0.08)',
-                                      boxShadow: isInterviewer ? '0 4px 20px rgba(167, 139, 250, 0.05)' : '0 4px 20px rgba(34, 211, 238, 0.05)',
-                                      textAlign: 'left'
+                                      borderRadius: '8px',
+                                      border: '1px solid rgba(34, 211, 238, 0.2)',
+                                      background: 'rgba(34, 211, 238, 0.04)',
+                                      boxShadow: '0 4px 20px rgba(34, 211, 238, 0.02)',
+                                      textAlign: 'left',
+                                      cursor: 'pointer'
                                     }}
                                   >
                                     <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.6', color: '#f3f4f6' }}>
-                                      {renderTextWithHighlights(seg.text, seg.fillerType)}
+                                      {renderTextWithHighlights(seg.text)}
                                     </p>
                                   </div>
                                 </div>
@@ -765,72 +807,142 @@ export default function App() {
                       )}
 
                       {activeTab === 'expressions' && (
-                        <div className="timeline-list">
-                          {expressions.length === 0 ? (
-                            <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Tidak ada data ekspresi.</p>
-                          ) : (
-                            expressions.map((exp) => (
-                              <div key={exp.id} className="timeline-item">
-                                <span className="time-stamp">{exp.timestampSec.toFixed(1)}s</span>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-                                  <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff', textTransform: 'capitalize' }}>
-                                    🎭 Ekspresi: {exp.emotion}
-                                  </span>
-                                  <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                                    Confidence: {Math.round(exp.confidence * 100)}%
-                                  </span>
-                                </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                          {/* Emotion Distribution Summary Chart */}
+                          {expressions.length > 0 && (
+                            <div className="glass" style={{ padding: '16px', borderRadius: '10px' }}>
+                              <h4 style={{ color: '#fff', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Distribusi Emosi Wajah</h4>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', width: '100%' }}>
+                                {(() => {
+                                  const counts: Record<string, number> = {};
+                                  expressions.forEach(e => { counts[e.emotion] = (counts[e.emotion] || 0) + 1; });
+                                  const total = expressions.length;
+                                  return Object.entries(counts)
+                                    .sort((a, b) => b[1] - a[1])
+                                    .map(([emotion, count]) => {
+                                      const pct = ((count / total) * 100).toFixed(1);
+                                      return (
+                                        <div key={emotion} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                          <span style={{ width: '80px', textTransform: 'capitalize', fontSize: '12px', color: '#fff', fontWeight: 600 }}>{emotion}</span>
+                                          <div style={{ flexGrow: 1, height: '12px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '6px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                            <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(90deg, var(--secondary), var(--primary))', borderRadius: '6px' }} />
+                                          </div>
+                                          <span style={{ width: '45px', fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right' }}>{pct}%</span>
+                                        </div>
+                                      );
+                                    });
+                                })()}
                               </div>
-                            ))
+                            </div>
                           )}
+
+                          <div className="timeline-list">
+                            {expressions.length === 0 ? (
+                              <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Tidak ada data ekspresi.</p>
+                            ) : (
+                              expressions.map((exp) => (
+                                <div key={exp.id} className="timeline-item" onClick={() => handleSeek(exp.timestampSec)} style={{ cursor: 'pointer' }}>
+                                  <span className="time-stamp">{exp.timestampSec.toFixed(1)}s</span>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '14px', fontWeight: 600, color: '#fff', textTransform: 'capitalize' }}>
+                                      🎭 Ekspresi: {exp.emotion}
+                                    </span>
+                                    <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                                      Confidence: {Math.round(exp.confidence * 100)}%
+                                    </span>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         </div>
                       )}
 
                       {activeTab === 'voice' && (
-                        <div className="timeline-list">
-                          {voices.length === 0 ? (
-                            <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Tidak ada data kualitas suara.</p>
-                          ) : (
-                            voices.map((v) => (
-                              <div key={v.id} className="timeline-item">
-                                <span className="time-stamp">{v.timestampSec.toFixed(1)}s</span>
-                                <div style={{ display: 'flex', gap: '20px', width: '100%', fontSize: '13.5px' }}>
-                                  {v.pitchHz && (
-                                    <span>📈 Pitch: <strong>{v.pitchHz.toFixed(1)} Hz</strong></span>
-                                  )}
-                                  {v.intensityDb && (
-                                    <span>🔊 Intensitas: <strong>{v.intensityDb.toFixed(1)} dB</strong></span>
-                                  )}
-                                  {v.audioEmotion && (
-                                    <span style={{ color: 'var(--primary)', marginLeft: 'auto' }}>
-                                      Vokal Emosi: <strong>{v.audioEmotion}</strong>
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            ))
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                          {/* Pitch and Intensity Line Chart */}
+                          {voices.length > 0 && (
+                            <div className="glass" style={{ padding: '16px', borderRadius: '10px' }}>
+                              <h4 style={{ color: '#fff', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Visualisasi Pitch & Intensitas Suara</h4>
+                              {(() => {
+                                const validVoices = voices.filter(v => v.pitchHz !== null && v.pitchHz > 0);
+                                                               const maxPitch = Math.max(...validVoices.map(v => v.pitchHz || 0), 200);
+                                const maxIntensity = Math.max(...voices.map(v => v.intensityDb || 0), 80);
+                                const width = 800;
+                                const height = 150;
+                                
+                                const pitchPoints = voices.map((v, i) => {
+                                  const divisor = voices.length > 1 ? voices.length - 1 : 1;
+                                  const x = (i / divisor) * (width - 40) + 20;
+                                  const y = height - ((v.pitchHz || 0) / maxPitch) * (height - 30) - 15;
+                                  return `${x},${y}`;
+                                });
+                                
+                                const intensityPoints = voices.map((v, i) => {
+                                  const divisor = voices.length > 1 ? voices.length - 1 : 1;
+                                  const x = (i / divisor) * (width - 40) + 20;
+                                  const y = height - ((v.intensityDb || 0) / maxIntensity) * (height - 30) - 15;
+                                  return `${x},${y}`;
+                                });
+                                
+                                return (
+                                  <div style={{ position: 'relative', width: '100%', overflowX: 'auto' }}>
+                                    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                                      {validVoices.length > 1 && (
+                                        <path
+                                          d={`M ${pitchPoints.join(' L ')}`}
+                                          fill="none"
+                                          stroke="#22d3ee"
+                                          strokeWidth="2.5"
+                                        />
+                                      )}
+                                      {voices.length > 1 && (
+                                        <path
+                                          d={`M ${intensityPoints.join(' L ')}`}
+                                          fill="none"
+                                          stroke="#c084fc"
+                                          strokeWidth="2"
+                                          strokeDasharray="4 3"
+                                        />
+                                      )}
+                                      <text x="20" y="20" fill="#22d3ee" fontSize="11" fontWeight="bold">● Pitch (Hz)</text>
+                                      <text x="120" y="20" fill="#c084fc" fontSize="11" fontWeight="bold">- - Intensitas (dB)</text>
+                                    </svg>
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           )}
+
+                          <div className="timeline-list">
+                            {voices.length === 0 ? (
+                              <p style={{ color: 'var(--text-muted)', fontSize: '13px' }}>Tidak ada data kualitas suara.</p>
+                            ) : (
+                              voices.map((v) => (
+                                <div key={v.id} className="timeline-item" onClick={() => handleSeek(v.timestampSec)} style={{ cursor: 'pointer' }}>
+                                  <span className="time-stamp">{v.timestampSec.toFixed(1)}s</span>
+                                  <div style={{ display: 'flex', gap: '20px', width: '100%', fontSize: '13.5px' }}>
+                                    {v.pitchHz && (
+                                      <span>📈 Pitch: <strong>{v.pitchHz.toFixed(1)} Hz</strong></span>
+                                    )}
+                                    {v.intensityDb && (
+                                      <span>🔊 Intensitas: <strong>{v.intensityDb.toFixed(1)} dB</strong></span>
+                                    )}
+                                    {v.audioEmotion && (
+                                      <span style={{ color: 'var(--primary)', marginLeft: 'auto' }}>
+                                        Vokal Emosi: <strong>{v.audioEmotion}</strong>
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
                   </div>
-
-                  {/* Recommendations Dynamic List */}
-                  {detail.summary?.recommendations && detail.summary.recommendations.length > 0 && (
-                    <div className="glass recommendations-card">
-                      <h3 className="section-title" style={{ color: '#fff', fontSize: '15px' }}>
-                        Rekomendasi Perbaikan Bicara (Auto-generated)
-                      </h3>
-                      <div className="recommendations-list">
-                        {detail.summary.recommendations.map((rec, i) => (
-                          <div key={i} className="recommendation-item">
-                            <span className="rec-icon">⚡</span>
-                            <p>{rec}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  
                 </>
               )}
             </>

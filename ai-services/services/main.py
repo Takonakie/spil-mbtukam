@@ -65,6 +65,7 @@ class MbtiResponse(BaseModel):
     confidence: float
     reasoning: dict
     recommendations: Optional[List[str]] = None
+    executive_summary: Optional[str] = None
 
 class DialogueSegment(BaseModel):
     index: int
@@ -226,10 +227,36 @@ def analyze_transcript(request: AnalyzeRequest):
 @app.post("/analyze/audio", response_model=AudioAnalysisResponse)
 def analyze_audio(request: AnalyzeRequest):
     file_path = request.file_path
+    temp_wav = None
+    snd_path = file_path
     
     try:
+        import tempfile
+        import subprocess
+        
+        # If file is not WAV, convert it to temporary WAV using ffmpeg
+        if not file_path.lower().endswith('.wav'):
+            temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+            temp_wav.close() # Close it so subprocess can write to it
+            
+            # Run ffmpeg command to extract audio
+            cmd = [
+                'ffmpeg', '-y', '-i', file_path, 
+                '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', 
+                temp_wav.name
+            ]
+            # Hide console window on Windows
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                
+            print(f"🎬 Converting {file_path} to WAV temp file for Parselmouth...")
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, check=True)
+            snd_path = temp_wav.name
+
         # Load audio using Praat Parselmouth
-        snd = parselmouth.Sound(file_path)
+        snd = parselmouth.Sound(snd_path)
         
         # Auto-correlation fundamental frequency (F0 / Pitch) & Intensity
         pitch = snd.to_pitch()
@@ -243,7 +270,7 @@ def analyze_audio(request: AnalyzeRequest):
         timestamps = np.arange(0.0, duration, 1.0)
         for t in timestamps:
             p_val = pitch.get_value_at_time(t)
-            i_val = intensity.get_value_at_time(t)
+            i_val = intensity.get_value(t)
             
             pitch_hz = float(p_val) if not np.isnan(p_val) and p_val > 0 else 0.0
             intensity_db = float(i_val) if not np.isnan(i_val) and i_val > 0 else 50.0  # Min noise floor
@@ -272,8 +299,8 @@ def analyze_audio(request: AnalyzeRequest):
         point_process = parselmouth.praat.call(snd, "To PointProcess (periodic, cc)", 75, 500)
         
         # Local Jitter & Shimmer
-        local_jitter = parselmouth.praat.call(point_process, "Get local jitter", 0, 0, 0.0001, 0.02, 1.3)
-        local_shimmer = parselmouth.praat.call([snd, point_process], "Get local shimmer", 0, 0, 0.0001, 0.02, 1.3, 1.6)
+        local_jitter = parselmouth.praat.call(point_process, "Get jitter (local)...", 0, 0, 0.0001, 0.02, 1.3)
+        local_shimmer = parselmouth.praat.call([snd, point_process], "Get shimmer (local)...", 0, 0, 0.0001, 0.02, 1.3, 1.6)
         
         # Harmonicity (Harmonic-to-Noise Ratio)
         harmonicity = snd.to_harmonicity()
@@ -303,6 +330,12 @@ def analyze_audio(request: AnalyzeRequest):
             audio_emotion=[{"timestamp_sec": 0.0, "emotion": "neutral", "confidence": 0.8}],
             voice_quality={"jitter": 0.015, "shimmer": 0.045, "hnr": 18.0}
         )
+    finally:
+        if temp_wav and os.path.exists(temp_wav.name):
+            try:
+                os.remove(temp_wav.name)
+            except Exception:
+                pass
 
 @app.post("/analyze/mbti", response_model=MbtiResponse)
 def analyze_mbti(request: MbtiRequest):
@@ -415,64 +448,75 @@ def analyze_mbti(request: MbtiRequest):
         f"Sebagai seorang {predicted}, manfaatkan kekuatan kepribadian Anda untuk menyajikan solusi masalah secara logis dan terstruktur."
     ]
     
+    default_summary = (
+        f"Kandidat menunjukkan profil komunikasi yang berciri khas {predicted} dengan tingkat kelancaran WPM sebesar {int(wpm)} "
+        f"dan rasio senyuman {int(smile_ratio*100)}%. Pola ekspresi dan intonasi vokal kandidat cenderung stabil secara umum. "
+        f"Kandidat direkomendasikan untuk meningkatkan antusiasme dan meminimalkan filler words guna memperkuat dampak penyampaian."
+    )
+    
     confidence = round(0.7 + (abs(e_score - i_score) + abs(s_score - n_score) + abs(t_score - f_score) + abs(j_score - p_score)) / 4.0, 2)
     confidence = max(0.70, min(0.98, confidence))
 
     api_key = os.environ.get("GEMINI_API_KEY")
-    if api_key:
-        try:
-            print("🧠 Generating Gemini clinical MBTI reasoning & recommendations...")
-            client = genai.Client(api_key=api_key)
-            
-            prompt = f"""
-            Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen. Berdasarkan data multimodal kandidat berikut:
-            - Estimasi MBTI: {predicted}
-            - Skor Kepribadian: {scores}
-            - Kecepatan Vokal WPM: {int(wpm)} WPM
-            - Rasio Filler Words: {filler_ratio:.2f}
-            - Intensitas Suara Rata-rata: {mean_intensity:.1f} dB
-            - Rasio Senyuman Wajah: {smile_ratio:.2f}
-            
-            Tugas Anda adalah:
-            1. Buat kalimat analisis yang sangat mendalam (masing-masing 1 kalimat profesional) untuk dimensi:
-               - E_I: Extraversion vs Introversion
-               - S_N: Sensing vs Intuition
-               - T_F: Thinking vs Feeling
-               - J_P: Judging vs Perceiving
-            2. Berikan 3 poin rekomendasi perbaikan komunikasi/karier yang sangat operasional dan personal bagi kandidat (sebagai List of strings).
-            
-            Jawablah dalam format JSON terstruktur yang valid sesuai schema MbtiResponse.
-            """
-            
-            response = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=MbtiResponse,
-                    temperature=0.2
-                ),
-            )
-            
-            import json
-            data = json.loads(response.text)
-            return MbtiResponse(
-                predicted_type=predicted,
-                scores=scores,
-                confidence=confidence,
-                reasoning=data.get("reasoning", reasoning),
-                recommendations=data.get("recommendations", default_recs)
-            )
-        except Exception as e:
-            print(f"❌ Gemini MBTI reasoning generation failed: {e}. Falling back to default heuristics.")
-            
-    return MbtiResponse(
-        predicted_type=predicted,
-        scores=scores,
-        confidence=confidence,
-        reasoning=reasoning,
-        recommendations=default_recs
-    )
+    gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="GEMINI_API_KEY is not configured in the environment. It is required to generate the executive summary."
+        )
+    
+    try:
+        print(f"🧠 Generating Gemini clinical MBTI reasoning & recommendations using {gemini_model}...")
+        client = genai.Client(api_key=api_key)
+        
+        prompt = f"""
+        Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen. Berdasarkan data multimodal kandidat berikut:
+        - Estimasi MBTI: {predicted}
+        - Skor Kepribadian: {scores}
+        - Kecepatan Vokal WPM: {int(wpm)} WPM
+        - Rasio Filler Words: {filler_ratio:.2f}
+        - Intensitas Suara Rata-rata: {mean_intensity:.1f} dB
+        - Rasio Senyuman Wajah: {smile_ratio:.2f}
+        
+        Tugas Anda adalah:
+        1. Buat kalimat analisis yang sangat mendalam (masing-masing 1 kalimat profesional) untuk dimensi:
+           - E_I: Extraversion vs Introversion
+           - S_N: Sensing vs Intuition
+           - T_F: Thinking vs Feeling
+           - J_P: Judging vs Perceiving
+        2. Berikan 3 poin rekomendasi perbaikan komunikasi/karier yang sangat operasional dan personal bagi kandidat (sebagai List of strings).
+        3. Tulis executive_summary berupa 3 kalimat profesional bahasa Indonesia yang mendalam mengenai rangkuman komunikasi, emosi, dan kecocokan soft skill kandidat.
+        
+        Jawablah dalam format JSON terstruktur yang valid sesuai schema MbtiResponse.
+        """
+        
+        response = client.models.generate_content(
+            model=gemini_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=MbtiResponse,
+                temperature=0.2
+            ),
+        )
+        
+        import json
+        data = json.loads(response.text)
+        return MbtiResponse(
+            predicted_type=predicted,
+            scores=scores,
+            confidence=confidence,
+            reasoning=data.get("reasoning", reasoning),
+            recommendations=data.get("recommendations", default_recs),
+            executive_summary=data.get("executive_summary", default_summary)
+        )
+    except Exception as e:
+        print(f"❌ Gemini MBTI reasoning generation failed: {e}.")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini MBTI reasoning generation failed: {str(e)}"
+        )
 
 @app.post("/analyze/dialogue", response_model=DialogueResponse)
 def analyze_dialogue(request: DialogueRequest):

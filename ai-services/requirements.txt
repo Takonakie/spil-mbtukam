@@ -15,3 +15,5 @@ deepface==0.0.92
 gdown==5.2.0
 # tensorflow==2.16.1 # Uncomment if YAMNet/DeepFace requires full tensorflow locally
 # tensorflow-hub==0.16.1
+google-genai
+tf-keras
