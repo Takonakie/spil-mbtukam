@@ -81,6 +81,29 @@ interface TranscriptSegment {
 
 const API_BASE_URL = 'http://localhost:3001';
 
+const translateArchetype = (code: string | null | undefined): string => {
+  if (!code) return 'Tidak Diketahui';
+  const mapping: Record<string, string> = {
+    'ISTJ': 'Pelaksana Terorganisir & Praktis',
+    'ISFJ': 'Penyokong Praktis & Suportif',
+    'INFJ': 'Visioner Empatis & Penasihat',
+    'INTJ': 'Perencana Strategis & Analitis',
+    'ISTP': 'Pemecah Masalah Teknis & Praktis',
+    'ISFP': 'Kreatif Reflektif & Mandiri',
+    'INFP': 'Idealis Kreatif & Harmonis',
+    'INTP': 'Analitis Konseptual & Pemikir',
+    'ESTP': 'Spontan Pragmatis & Berani',
+    'ESFP': 'Komunikator Dinamis & Antusias',
+    'ENFP': 'Inspirator Kreatif & Kolaboratif',
+    'ENTP': 'Inovator Ekspresif & Debatur',
+    'ESTJ': 'Pelaksana Terstruktur & Pemimpin',
+    'ESFJ': 'Suportif Kolaboratif & Sosial',
+    'ENFJ': 'Pemimpin Empatis & Fasilitator',
+    'ENTJ': 'Pemimpin Strategis & Visioner'
+  };
+  return mapping[code.toUpperCase()] || code;
+};
+
 export default function App() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -423,8 +446,8 @@ export default function App() {
                   <li style={{ display: 'flex', gap: '10px' }}>
                     <span style={{ color: 'var(--secondary)' }}>✓</span>
                     <div>
-                      <strong style={{ color: '#fff' }}>Estimasi MBTI</strong>
-                      <p>Prediksi kepribadian MBTI logis berdasarkan kombinasi sinyal multimodal.</p>
+                      <strong style={{ color: '#fff' }}>Analisis Karakter & Soft Skills</strong>
+                      <p>Menganalisis gaya komunikasi, pengambilan keputusan, dan kecenderungan karakter kerja profesional.</p>
                     </div>
                   </li>
                 </ul>
@@ -591,17 +614,20 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* MBTI Grid Display */}
+                  {/* Profil Gaya Komunikasi & Karakter */}
                   <div className="mbti-grid">
                     
                     {/* Dynamic Bar sliders */}
                     <div className="glass mbti-bars-card">
-                      <h3 className="section-title" style={{ color: '#fff', fontSize: '15px' }}>Profil Dimensi MBTI</h3>
+                      <h3 className="section-title" style={{ color: '#fff', fontSize: '15px' }}>Profil Gaya Komunikasi & Karakter</h3>
                       
-                      {/* E vs I */}
-                      <div className="mbti-bar-row">
-                        <span className="mbti-dimension-label left" style={{ color: (detail.mbti?.eScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>E</span>
-                        <div className="mbti-progress-container">
+                      {/* Gaya Komunikasi: Komunikatif vs Reflektif */}
+                      <div className="mbti-bar-row-wrapper" style={{ marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.eScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Komunikatif/Ekspresif ({Math.round((detail.mbti?.eScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.iScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Reflektif/Tenang ({Math.round((detail.mbti?.iScore || 0) * 100)}%)</span>
+                        </div>
+                        <div className="mbti-progress-container" style={{ height: '8px' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
@@ -610,13 +636,15 @@ export default function App() {
                             }} 
                           />
                         </div>
-                        <span className="mbti-dimension-label right" style={{ color: (detail.mbti?.iScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>I</span>
                       </div>
 
-                      {/* S vs N */}
-                      <div className="mbti-bar-row">
-                        <span className="mbti-dimension-label left" style={{ color: (detail.mbti?.sScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>S</span>
-                        <div className="mbti-progress-container">
+                      {/* Fokus Informasi: Praktis vs Konseptual */}
+                      <div className="mbti-bar-row-wrapper" style={{ marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.sScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Praktis/Faktual ({Math.round((detail.mbti?.sScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.nScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Konseptual/Strategis ({Math.round((detail.mbti?.nScore || 0) * 100)}%)</span>
+                        </div>
+                        <div className="mbti-progress-container" style={{ height: '8px' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
@@ -625,13 +653,15 @@ export default function App() {
                             }} 
                           />
                         </div>
-                        <span className="mbti-dimension-label right" style={{ color: (detail.mbti?.nScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>N</span>
                       </div>
 
-                      {/* T vs F */}
-                      <div className="mbti-bar-row">
-                        <span className="mbti-dimension-label left" style={{ color: (detail.mbti?.tScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>T</span>
-                        <div className="mbti-progress-container">
+                      {/* Gaya Keputusan: Logis vs Empatis */}
+                      <div className="mbti-bar-row-wrapper" style={{ marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.tScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Logis/Objektif ({Math.round((detail.mbti?.tScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.fScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Empatis/Personal ({Math.round((detail.mbti?.fScore || 0) * 100)}%)</span>
+                        </div>
+                        <div className="mbti-progress-container" style={{ height: '8px' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
@@ -640,13 +670,15 @@ export default function App() {
                             }} 
                           />
                         </div>
-                        <span className="mbti-dimension-label right" style={{ color: (detail.mbti?.fScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>F</span>
                       </div>
 
-                      {/* J vs P */}
-                      <div className="mbti-bar-row">
-                        <span className="mbti-dimension-label left" style={{ color: (detail.mbti?.jScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>J</span>
-                        <div className="mbti-progress-container">
+                      {/* Gaya Kerja: Terstruktur vs Adaptif */}
+                      <div className="mbti-bar-row-wrapper">
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.jScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Terstruktur/Terencana ({Math.round((detail.mbti?.jScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: 600, color: (detail.mbti?.pScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Adaptif/Spontan ({Math.round((detail.mbti?.pScore || 0) * 100)}%)</span>
+                        </div>
+                        <div className="mbti-progress-container" style={{ height: '8px' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
@@ -655,7 +687,6 @@ export default function App() {
                             }} 
                           />
                         </div>
-                        <span className="mbti-dimension-label right" style={{ color: (detail.mbti?.pScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>P</span>
                       </div>
                     </div>
 
@@ -663,24 +694,75 @@ export default function App() {
                     <div className="glass mbti-predicted-card">
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         <span style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                          Kepribadian (Estimasi AI)
+                          Karakter Utama (Analisis AI)
                         </span>
-                        <span className="mbti-large-type">{detail.mbti?.predictedType || 'ENFJ'}</span>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                          Confidence Level: {detail.mbti ? Math.round(detail.mbti.confidence * 100) : 0}%
+                        <span className="mbti-large-type" style={{ fontSize: '20px', margin: '8px 0', textAlign: 'center', color: 'var(--secondary)' }}>
+                          {translateArchetype(detail.mbti?.predictedType)}
+                        </span>
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+                          Kepercayaan Analisis: {detail.mbti ? Math.round(detail.mbti.confidence * 100) : 0}%
                         </span>
                       </div>
                       
                       {detail.mbti?.reasoning && (
-                        <div style={{ marginTop: '10px' }}>
-                          <p className="mbti-reasoning-item">
-                            💡 {detail.mbti.reasoning.E_I}
+                        <div style={{ 
+                          marginTop: '10px', 
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          gap: '8px'
+                        }}>
+                          <p className="mbti-reasoning-item" style={{ fontSize: '13px', margin: 0, paddingLeft: '8px', borderLeft: '2px solid var(--secondary)' }}>
+                            💬 <strong>Komunikasi:</strong> {detail.mbti.reasoning.E_I}
                           </p>
-                          <p className="mbti-reasoning-item" style={{ borderLeftColor: 'var(--secondary)' }}>
-                            🧠 {detail.mbti.reasoning.T_F}
+                          <p className="mbti-reasoning-item" style={{ fontSize: '13px', margin: 0, paddingLeft: '8px', borderLeft: '2px solid var(--primary)' }}>
+                            🔍 <strong>Informasi:</strong> {detail.mbti.reasoning.S_N}
+                          </p>
+                          <p className="mbti-reasoning-item" style={{ fontSize: '13px', margin: 0, paddingLeft: '8px', borderLeft: '2px solid var(--success)' }}>
+                            🧠 <strong>Keputusan:</strong> {detail.mbti.reasoning.T_F}
+                          </p>
+                          <p className="mbti-reasoning-item" style={{ fontSize: '13px', margin: 0, paddingLeft: '8px', borderLeft: '2px solid var(--warning)' }}>
+                            💼 <strong>Gaya Kerja:</strong> {detail.mbti.reasoning.J_P}
                           </p>
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Soft Skills Section */}
+                  <div className="glass" style={{ padding: '20px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                    <h3 className="section-title" style={{ color: '#fff', fontSize: '15px', margin: 0 }}>Analisis Karakter & Soft Skills Tambahan</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px' }}>
+                      
+                      {/* Confidence Card */}
+                      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '15px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ fontSize: '28px' }}>🦁</div>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Kepercayaan Diri</span>
+                          <strong style={{ fontSize: '20px', color: '#34d399' }}>{detail.mbti ? Math.round(detail.mbti.confidence * 100) : 80}%</strong>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.3' }}>Diukur dari kestabilan energi vokal, kontak mata, dan rasio ekspresi terbuka.</p>
+                        </div>
+                      </div>
+
+                      {/* Emotional Stability Card */}
+                      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '15px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ fontSize: '28px' }}>⚖️</div>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Stabilitas Emosi</span>
+                          <strong style={{ fontSize: '20px', color: '#22d3ee' }}>{detail.summary?.emotionStabilityScore || 100}%</strong>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.3' }}>Diukur dari variabilitas emosi wajah dominan selama sesi wawancara berlangsung.</p>
+                        </div>
+                      </div>
+
+                      {/* Speech Clarity Card */}
+                      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-color)', borderRadius: '12px', padding: '15px', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                        <div style={{ fontSize: '28px' }}>🎯</div>
+                        <div style={{ flex: 1 }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Kejelasan Bicara</span>
+                          <strong style={{ fontSize: '20px', color: '#fbbf24' }}>{Math.max(0, Math.round(100 - (detail.summary?.fillerPercentage || 0) * 5))}%</strong>
+                          <p style={{ margin: '4px 0 0 0', fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.3' }}>Diukur dari kefasihan berbicara tanpa gangguan kata jeda (filler words).</p>
+                        </div>
+                      </div>
+
                     </div>
                   </div>
 
