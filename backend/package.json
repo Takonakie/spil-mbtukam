@@ -1,25 +1,31 @@
 {
   "name": "interview-analyzer-backend",
   "version": "1.0.0",
-  "description": "Backend API for Interview Analyzer using ElysiaJS and Drizzle ORM",
+  "description": "Backend API for Interview Analyzer using Express.js and Drizzle ORM",
   "main": "src/index.ts",
+  "type": "module",
   "scripts": {
-    "dev": "bun --watch src/index.ts",
+    "dev": "tsx watch src/index.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push:pg",
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@elysiajs/cors": "^1.0.2",
-    "elysia": "^1.0.12",
+    "cors": "^2.8.5",
     "drizzle-orm": "^0.30.9",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
     "pg": "^8.11.5"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.14.2",
     "@types/pg": "^8.11.6",
-    "bun-types": "latest",
     "drizzle-kit": "^0.20.17",
+    "tsx": "^4.15.1",
     "typescript": "^5.4.5"
   }
 }

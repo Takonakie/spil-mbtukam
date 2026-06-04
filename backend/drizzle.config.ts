@@ -5,6 +5,6 @@ export default {
   out: './src/db/migrations',
   driver: 'pg',
   dbCredentials: {
-    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:123Gagah_@localhost:5432/interview_analyzer',
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:1234@localhost:5433/interview_analyzer',
   },
 } satisfies Config;

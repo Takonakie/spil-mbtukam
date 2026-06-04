@@ -49,6 +49,8 @@ export const transcriptSegmentsTable = pgTable('transcript_segments', {
   text: text('text').notNull(),
   isFiller: boolean('is_filler').default(false).notNull(),
   fillerType: varchar('filler_type', { length: 50 }),
+  fillerCount: integer('filler_count').default(0).notNull(),
+  pauseBeforeSec: doublePrecision('pause_before_sec').default(0).notNull(),
   speaker: varchar('speaker', { length: 50 }).default('candidate').notNull(),
   speechAct: varchar('speech_act', { length: 50 }).default('statement').notNull()
 });

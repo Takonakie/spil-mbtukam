@@ -48,6 +48,8 @@ class TranscriptSegment(BaseModel):
     text: str
     is_filler: bool
     filler_type: Optional[str] = None
+    filler_count: int = 0
+    pause_before_sec: float = 0.0
 
 class AudioAnalysisResponse(BaseModel):
     pitch_data: List[dict]
@@ -67,26 +69,21 @@ class MbtiResponse(BaseModel):
     recommendations: Optional[List[str]] = None
     executive_summary: Optional[str] = None
 
-class DialogueSegment(BaseModel):
-    index: int
-    text: str
-
-class DialogueRequest(BaseModel):
-    segments: List[DialogueSegment]
-
-class ClassifiedSegment(BaseModel):
-    index: int
-    speaker: str
-    speech_act: str
-
-class DialogueResponse(BaseModel):
-    segments: List[ClassifiedSegment]
-
 # Initialize Whisper model globally on CPU or GPU
 print("Loading Whisper model...")
 device = "cuda" if torch.cuda.is_available() else "cpu"
-whisper_model = whisper.load_model("base", device=device)
+try:
+    print("Attempting to load Whisper 'medium' model...")
+    whisper_model = whisper.load_model("medium", device=device)
+except Exception as e:
+    print(f"Failed to load Whisper 'medium' model: {e}. Falling back to 'small'...")
+    try:
+        whisper_model = whisper.load_model("small", device=device)
+    except Exception as e2:
+        print(f"Failed to load Whisper 'small' model: {e2}. Falling back to 'base'...")
+        whisper_model = whisper.load_model("base", device=device)
 print(f"Whisper model loaded successfully on {device}!")
+
 
 @app.get("/health")
 def health_check():
@@ -163,60 +160,234 @@ def analyze_expression(request: AnalyzeRequest):
     # Return neutral array if video was extremely short or empty
     if not results:
         results.append(ExpressionItem(timestamp_sec=0.0, emotion="neutral", confidence=1.0))
+    else:
+        # Apply temporal smoothing
+        if len(results) > 1:
+            # 1. First pass: confidence-weighted voting with sliding window (5 frames = 2.5s)
+            first_pass_emotions = []
+            for i in range(len(results)):
+                window = results[max(0, i-2):min(len(results), i+3)]
+                scores = {}
+                for item in window:
+                    emo = item.emotion
+                    weight = item.confidence if item.confidence >= 0.5 else item.confidence * 0.2
+                    scores[emo] = scores.get(emo, 0.0) + weight
+                best_emo = max(scores, key=scores.get) if scores else "neutral"
+                first_pass_emotions.append(best_emo)
+                
+            # 2. Second pass: enforce minimum transition duration of 1.5s (3 frames)
+            runs = []
+            current_emo = first_pass_emotions[0]
+            start_idx = 0
+            for idx in range(1, len(first_pass_emotions)):
+                if first_pass_emotions[idx] != current_emo:
+                    runs.append({"emotion": current_emo, "start": start_idx, "end": idx})
+                    current_emo = first_pass_emotions[idx]
+                    start_idx = idx
+            runs.append({"emotion": current_emo, "start": start_idx, "end": len(first_pass_emotions)})
+            
+            # Merge short runs (length < 3 frames / 1.5s)
+            smoothed_emotions = list(first_pass_emotions)
+            for r_idx, run in enumerate(runs):
+                run_len = run["end"] - run["start"]
+                if run_len < 3:
+                    target_emo = None
+                    if r_idx == 0:
+                        if r_idx + 1 < len(runs):
+                            target_emo = runs[r_idx + 1]["emotion"]
+                    elif r_idx == len(runs) - 1:
+                        target_emo = runs[r_idx - 1]["emotion"]
+                    else:
+                        prev_len = runs[r_idx - 1]["end"] - runs[r_idx - 1]["start"]
+                        next_len = runs[r_idx + 1]["end"] - runs[r_idx + 1]["start"]
+                        if prev_len >= next_len:
+                            target_emo = runs[r_idx - 1]["emotion"]
+                        else:
+                            target_emo = runs[r_idx + 1]["emotion"]
+                    if target_emo:
+                        for k in range(run["start"], run["end"]):
+                            smoothed_emotions[k] = target_emo
+                            
+            # 3. Update original results with smoothed emotions & compute smoothed confidence
+            for idx in range(len(results)):
+                results[idx].emotion = smoothed_emotions[idx]
+                window = results[max(0, idx-2):min(len(results), idx+3)]
+                matching_confs = [w.confidence for w in window if w.emotion == smoothed_emotions[idx]]
+                if matching_confs:
+                    results[idx].confidence = round(float(np.mean(matching_confs)), 2)
         
     return results
+
+def preprocess_audio(input_path: str) -> str:
+    import tempfile
+    import subprocess
+    import os
+    
+    # We want a persistent temp file name, but we shouldn't delete it immediately
+    temp_wav = tempfile.NamedTemporaryFile(suffix='_normalized.wav', delete=False)
+    temp_wav.close()
+    
+    cmd = [
+        'ffmpeg', '-y', '-i', input_path,
+        '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+        '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11',
+        temp_wav.name
+    ]
+    
+    # Hide console window on Windows
+    startupinfo = None
+    if os.name == 'nt':
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        
+    print(f"[Preprocess] Normalizing and preprocessing audio from {input_path} to {temp_wav.name}...")
+    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, check=True)
+    return temp_wav.name
+
+def count_and_find_fillers(text: str, fillers_list: list):
+    import re
+    # Sort fillers by length descending so that multi-word phrases are matched first
+    sorted_fillers = sorted(fillers_list, key=len, reverse=True)
+    text_lower = text.lower()
+    
+    matched_fillers = []
+    temp_text = text_lower
+    for filler in sorted_fillers:
+        escaped = re.escape(filler)
+        # Use word boundary
+        pattern = r'\b' + escaped + r'\b'
+        matches = re.findall(pattern, temp_text)
+        if matches:
+            for m in matches:
+                matched_fillers.append(filler)
+            temp_text = re.sub(pattern, " [matched] ", temp_text)
+            
+    return len(matched_fillers), (matched_fillers[0] if matched_fillers else None)
+
+class PreprocessResponse(BaseModel):
+    normalized_path: str
+
+@app.post("/analyze/preprocess", response_model=PreprocessResponse)
+def analyze_preprocess(request: AnalyzeRequest):
+    try:
+        normalized_path = preprocess_audio(request.file_path)
+        return PreprocessResponse(normalized_path=normalized_path)
+    except Exception as e:
+        print(f"[Error] Audio preprocessing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Audio preprocessing failed: {str(e)}")
 
 @app.post("/analyze/transcript", response_model=List[TranscriptSegment])
 def analyze_transcript(request: AnalyzeRequest):
     file_path = request.file_path
     
+    # 1. Normalize/preprocess if needed
+    normalized_path = file_path
+    if not file_path.lower().endswith('_normalized.wav'):
+        try:
+            normalized_path = preprocess_audio(file_path)
+        except Exception as e:
+            print(f"[Warning] Preprocessing failed in transcript analysis: {e}. Using original file.")
+            
     # Contextual disfluency lexicons
-    indonesian_fillers = ["anu", "ehm", "ehh", "umm", "hmm", "gitu", "kayak", "jadi", "ya kan", "tuh", "nah", "kan", "sih", "kok", "deh"]
+    indonesian_fillers = [
+        # Vokal hesitation
+        "eh", "ehm", "ehem", "ehh", "em", "emm", "emh", "um", "umm", "uhm", "hmm", "hm",
+        # Particle discourse markers  
+        "anu", "gitu", "gitu lho", "gitu kan", "gitu deh",
+        "kayak", "kayaknya", "kaya", "kayanya",
+        "ya kan", "ya", "ya gitu", "yah",
+        "nah", "nah gitu", "tuh", "tuh kan",
+        "kan", "sih", "kok", "deh", "dong", "lho", "lah",
+        # Stalling phrases
+        "jadi", "jadi gini", "jadi kayak", "jadi ya",
+        "sebenarnya", "sebenernya", "gimana ya", "apa ya", "apa namanya",
+        "pokoknya", "intinya", "maksudnya", "artinya"
+    ]
     english_fillers = ["um", "uh", "like", "you know", "basically", "actually", "literally", "so", "right", "well"]
     all_fillers = indonesian_fillers + english_fillers
     
-    # Biasing decoder toward disfluencies
-    prompt = "Umm, ehh, anu, kayak, jadi gitu, hmm, ya kan, gitu lho, actually, basically, you know"
+    # Biasing decoder toward Indonesian colloquialism, filler words, and tech terminologies (code mixing)
+    prompt = "Halo, perkenalkan nama saya... Saya tertarik dengan posisi... Ehem, anu, kayak, jadi gitu, hmm, ya kan, gitu lho, actually, basically, you know. Saya menggunakan React, Node.js, database, backend, frontend, API."
     
     try:
-        # Transcribe with natural sentence/clause segmentation Timing
+        # Transcribe with natural sentence/clause segmentation, forced to Indonesian language 'id'
         result = whisper_model.transcribe(
-            file_path, 
-            initial_prompt=prompt
+            normalized_path, 
+            initial_prompt=prompt,
+            language="id",
+            temperature=0.0,
+            compression_ratio_threshold=2.4,
+            no_speech_threshold=0.6,
+            condition_on_previous_text=True,
+            word_timestamps=True
         )
         
         segments = []
-        for seg in result.get("segments", []):
+        raw_segments = result.get("segments", [])
+        prev_end = 0.0
+        
+        for seg in raw_segments:
+            curr_start = float(seg.get("start", 0.0))
+            curr_end = float(seg.get("end", 0.0))
             text = seg.get("text", "").strip()
             if not text:
                 continue
                 
-            # Scan the words in this sentence segment for any filler words
-            words_list = text.split()
-            is_filler = False
-            first_filler = None
+            # Check gap before this segment (≥ 1.5 seconds)
+            gap_before = curr_start - prev_end
+            if gap_before >= 1.5:
+                segments.append(TranscriptSegment(
+                    start_time=round(prev_end, 2),
+                    end_time=round(curr_start, 2),
+                    text="[Jeda]",
+                    is_filler=True,
+                    filler_type="pause",
+                    filler_count=1,
+                    pause_before_sec=round(gap_before, 2)
+                ))
+                
+            pause_before = max(0.0, gap_before)
             
-            for w in words_list:
-                w_clean = w.lower().strip(",.!?\"'")
-                if w_clean in all_fillers:
-                    is_filler = True
-                    first_filler = w_clean
-                    break
+            # Count fillers
+            f_count, first_f = count_and_find_fillers(text, all_fillers)
+            
+            # Detect intra-segment pauses (≥ 0.8s) between words
+            words = seg.get("words", [])
+            intra_segment_pauses = 0
+            if len(words) > 1:
+                for i in range(1, len(words)):
+                    w_prev_end = words[i-1].get("end", 0.0)
+                    w_curr_start = words[i].get("start", 0.0)
+                    if w_curr_start - w_prev_end >= 0.8:
+                        intra_segment_pauses += 1
+                        
+            if intra_segment_pauses > 0:
+                f_count += intra_segment_pauses
+                if not first_f:
+                    first_f = "pause"
                     
+            is_filler = (f_count > 0)
+            
             segments.append(TranscriptSegment(
-                start_time=float(seg.get("start", 0.0)),
-                end_time=float(seg.get("end", 0.0)),
+                start_time=round(curr_start, 2),
+                end_time=round(curr_end, 2),
                 text=text,
                 is_filler=is_filler,
-                filler_type=first_filler
+                filler_type=first_f,
+                filler_count=f_count,
+                pause_before_sec=round(pause_before, 2)
             ))
+            
+            prev_end = curr_end
             
         if not segments:
             segments.append(TranscriptSegment(
                 start_time=0.0,
                 end_time=1.0,
                 text="[Hening]",
-                is_filler=False
+                is_filler=False,
+                filler_count=0,
+                pause_before_sec=0.0
             ))
             
         return segments
@@ -231,29 +402,18 @@ def analyze_audio(request: AnalyzeRequest):
     snd_path = file_path
     
     try:
-        import tempfile
-        import subprocess
-        
-        # If file is not WAV, convert it to temporary WAV using ffmpeg
-        if not file_path.lower().endswith('.wav'):
-            temp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-            temp_wav.close() # Close it so subprocess can write to it
-            
-            # Run ffmpeg command to extract audio
-            cmd = [
-                'ffmpeg', '-y', '-i', file_path, 
-                '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', 
-                temp_wav.name
-            ]
-            # Hide console window on Windows
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                
-            print(f"🎬 Converting {file_path} to WAV temp file for Parselmouth...")
-            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=startupinfo, check=True)
-            snd_path = temp_wav.name
+        # If file is not a normalized WAV, preprocess it
+        if not file_path.lower().endswith('_normalized.wav'):
+            print(f"[Preprocess] Preprocessing and normalizing audio for Parselmouth: {file_path}")
+            try:
+                snd_path = preprocess_audio(file_path)
+                # Mock a temp_wav object for cleanup in finally block
+                class TempMock:
+                    name = snd_path
+                temp_wav = TempMock()
+            except Exception as e:
+                print(f"[Warning] Preprocessing failed in audio analysis: {e}. Using original file.")
+                snd_path = file_path
 
         # Load audio using Praat Parselmouth
         snd = parselmouth.Sound(snd_path)
@@ -264,35 +424,95 @@ def analyze_audio(request: AnalyzeRequest):
         duration = snd.duration
         
         pitch_data = []
-        audio_emotion = []
+        raw_emotions = []
         
         # Segment voice features per 1.0 second
         timestamps = np.arange(0.0, duration, 1.0)
+        prev_intensity = 60.0
+        
         for t in timestamps:
-            p_val = pitch.get_value_at_time(t)
-            i_val = intensity.get_value(t)
+            # Sample F0 and intensity at 20 steps (every 50ms) within this 1s window
+            window_times = np.arange(t, min(t + 1.0, duration), 0.05)
             
-            pitch_hz = float(p_val) if not np.isnan(p_val) and p_val > 0 else 0.0
-            intensity_db = float(i_val) if not np.isnan(i_val) and i_val > 0 else 50.0  # Min noise floor
+            p_vals = [pitch.get_value_at_time(wt) for wt in window_times]
+            i_vals = [intensity.get_value(wt) for wt in window_times]
+            
+            valid_p = [float(p) for p in p_vals if not np.isnan(p) and p > 50.0]  # Min pitch 50Hz
+            valid_i = [float(i) for i in i_vals if not np.isnan(i) and i > 0]
+            
+            mean_pitch = np.mean(valid_p) if valid_p else 0.0
+            max_pitch = np.max(valid_p) if valid_p else 0.0
+            min_pitch = np.min(valid_p) if valid_p else 0.0
+            pitch_range = max_pitch - min_pitch
+            
+            mean_intensity = np.mean(valid_i) if valid_i else 50.0
+            energy_delta = mean_intensity - prev_intensity
+            prev_intensity = mean_intensity
             
             pitch_data.append({
                 "timestamp_sec": round(float(t), 2),
-                "pitch_hz": round(pitch_hz, 2),
-                "intensity_db": round(intensity_db, 2)
+                "pitch_hz": round(float(mean_pitch), 2),
+                "intensity_db": round(float(mean_intensity), 2)
             })
             
-            # Simple pitch-energy based heuristic audio emotion model
-            if pitch_hz > 175 and intensity_db > 68:
-                emotion = "happy"
-            elif pitch_hz < 105 and pitch_hz > 0:
-                emotion = "sad"
+            # Sophisticated audio emotion heuristic model
+            # Categories: excited, calm, nervous, sad, confident, neutral
+            emotion = "neutral"
+            confidence = 0.7
+            
+            if mean_pitch > 0:
+                # Excited: High pitch, high intensity, large pitch range
+                if mean_pitch > 180 and mean_intensity > 68 and pitch_range > 40:
+                    emotion = "excited"
+                    confidence = 0.85
+                # Nervous: High pitch, lower intensity, unstable pitch (large range)
+                elif mean_pitch > 170 and mean_intensity < 65 and pitch_range > 50:
+                    emotion = "nervous"
+                    confidence = 0.75
+                # Confident: Stable pitch (moderate range), high/medium-high intensity
+                elif 110 <= mean_pitch <= 170 and mean_intensity > 66 and pitch_range <= 35:
+                    emotion = "confident"
+                    confidence = 0.8
+                # Calm: Stable pitch, moderate intensity
+                elif 100 <= mean_pitch <= 150 and 55 <= mean_intensity <= 66 and pitch_range <= 25:
+                    emotion = "calm"
+                    confidence = 0.8
+                # Sad: Low pitch, low intensity
+                elif mean_pitch < 110 and mean_intensity < 58:
+                    emotion = "sad"
+                    confidence = 0.75
             else:
                 emotion = "neutral"
+                confidence = 0.6
                 
-            audio_emotion.append({
+            raw_emotions.append({
                 "timestamp_sec": round(float(t), 2),
                 "emotion": emotion,
-                "confidence": 0.8
+                "confidence": confidence
+            })
+            
+        # Temporal smoothing of audio emotions (3-second window)
+        audio_emotion = []
+        for i in range(len(raw_emotions)):
+            window = raw_emotions[max(0, i-1):min(len(raw_emotions), i+2)]
+            
+            # Count confidence-weighted emotions in window
+            emotion_scores = {}
+            for item in window:
+                emo = item["emotion"]
+                conf = item["confidence"]
+                emotion_scores[emo] = emotion_scores.get(emo, 0.0) + conf
+                
+            best_emotion = max(emotion_scores, key=emotion_scores.get)
+            
+            # Average confidence of matching emotion in window
+            matching_confs = [item["confidence"] for item in window if item["emotion"] == best_emotion]
+            avg_conf = np.mean(matching_confs) if matching_confs else 0.7
+            
+            audio_emotion.append({
+                "timestamp_sec": raw_emotions[i]["timestamp_sec"],
+                "emotion": best_emotion,
+                "confidence": round(float(avg_conf), 2)
             })
             
         # Voice quality metrics (Jitter, Shimmer, HNR) using Praat algorithms
@@ -324,7 +544,7 @@ def analyze_audio(request: AnalyzeRequest):
         )
     except Exception as e:
         print(f"Praat voice analysis failed: {e}")
-        # Dynamic fallback on error/empty voice
+        # Dynamic fallback on error/empty vokal
         return AudioAnalysisResponse(
             pitch_data=[{"timestamp_sec": 0.0, "pitch_hz": 120.0, "intensity_db": 60.0}],
             audio_emotion=[{"timestamp_sec": 0.0, "emotion": "neutral", "confidence": 0.8}],
@@ -342,10 +562,10 @@ def analyze_mbti(request: MbtiRequest):
     # 1. Parse metrics from request data
     exprs = request.expression_data
     voices = request.voice_data
+    # PENTING: Semua transkrip = suara kandidat (tidak ada pewawancara)
     transcripts = request.transcript_data
     
     # 2. Calculate E vs I based on speaking rate and intensity
-    # Estimate speaking rate
     words = 0
     start_time = 0.0
     end_time = 10.0
@@ -407,11 +627,16 @@ def analyze_mbti(request: MbtiRequest):
     
     # 5. Calculate J vs P based on filler words ratio
     filler_ratio = 0.1
+    total_fillers = 0
     if transcripts:
-        fillers = sum(1 for t in transcripts if t.get('is_filler', False))
-        filler_ratio = fillers / len(transcripts)
+        total_fillers = sum(t.get('filler_count', 0) for t in transcripts)
+        total_words_approx = sum(len(t.get('text', '').split()) for t in transcripts)
+        if total_words_approx > 0:
+            filler_ratio = total_fillers / total_words_approx
+        else:
+            filler_ratio = total_fillers / max(1, len(transcripts))
         
-    p_score = 0.25 + (filler_ratio * 2.0)
+    p_score = 0.25 + (filler_ratio * 4.0)  # Calibrated scaling since ratio is per word now
     p_score = max(0.15, min(0.85, round(p_score, 2)))
     j_score = round(1.0 - p_score, 2)
     
@@ -436,20 +661,20 @@ def analyze_mbti(request: MbtiRequest):
     
     # Formulate contextual, logical reasoning
     reasoning = {
-        "E_I": f"Kandidat tergolong {'Extraversion' if e_score > i_score else 'Introversion'} karena memiliki tempo bicara {int(wpm)} WPM dengan intensitas vokal rata-rata {mean_intensity:.1f} dB yang {'mantap dan asertif' if mean_intensity > 66 else 'tenang dan reflektif'}.",
-        "J_P": f"Kandidat didominasi {'Judging' if j_score > p_score else 'Perceiving'} berkat rasio kata filler yang {'sangat rendah' if filler_ratio < 0.1 else 'cukup dinamis'}, mencerminkan pola penyampaian yang {'terstruktur teratur' if j_score > p_score else 'adaptif dan spontan'}.",
-        "S_N": f"Kandidat cenderung {'Sensing' if s_score > n_score else 'Intuition'} (skor {int(s_score*100)}% vs {int(n_score*100)}%) berdasarkan penggunaan diksi dan fokus pembicaraan yang lebih {'praktis/realistis' if s_score > n_score else 'konseptual/strategis'}.",
-        "T_F": f"Kandidat dinilai lebih {'Thinking' if t_score > f_score else 'Feeling'} dengan rasio senyuman {int(smile_ratio*100)}% selama interview, menunjukkan kecenderungan {'keputusan logis objektif' if t_score > f_score else 'pendekatan empatik interpersonal'}."
+        "E_I": f"Kandidat cenderung menunjukkan gaya komunikasi yang {'Ekspresif & Terbuka' if e_score > i_score else 'Reflektif & Tenang'} dengan tempo bicara {int(wpm)} WPM dan intensitas vokal rata-rata {mean_intensity:.1f} dB.",
+        "S_N": f"Kandidat berfokus pada penyampaian informasi secara {'Praktis & Faktual' if s_score > n_score else 'Konseptual & Strategis'} berdasarkan pilihan diksi yang digunakan selama sesi.",
+        "T_F": f"Kandidat memiliki gaya keputusan yang cenderung {'Logis & Objektif' if t_score > f_score else 'Empatis & Personal'} dengan rasio senyuman wajah sekitar {int(smile_ratio*100)}%.",
+        "J_P": f"Kandidat menampilkan gaya kerja yang {'Terstruktur & Terencana' if j_score > p_score else 'Adaptif & Spontan'} terlihat dari pola kelancaran bicara dan penggunaan filler words."
     }
     
     default_recs = [
         "Latih kejelasan vokal Anda dan pertahankan kontak mata yang stabil untuk memancarkan rasa percaya diri.",
         "Cobalah untuk mengurangi filler words dengan beristirahat sejenak (pausing) sebelum menjawab pertanyaan.",
-        f"Sebagai seorang {predicted}, manfaatkan kekuatan kepribadian Anda untuk menyajikan solusi masalah secara logis dan terstruktur."
+        "Tonjolkan kekuatan alami karakter komunikasi Anda untuk menyajikan solusi masalah secara terstruktur."
     ]
     
     default_summary = (
-        f"Kandidat menunjukkan profil komunikasi yang berciri khas {predicted} dengan tingkat kelancaran WPM sebesar {int(wpm)} "
+        f"Kandidat menunjukkan profil komunikasi yang berciri khas {'Ekspresif & Terbuka' if e_score > i_score else 'Reflektif & Tenang'} dengan tingkat kelancaran WPM sebesar {int(wpm)} "
         f"dan rasio senyuman {int(smile_ratio*100)}%. Pola ekspresi dan intonasi vokal kandidat cenderung stabil secara umum. "
         f"Kandidat direkomendasikan untuk meningkatkan antusiasme dan meminimalkan filler words guna memperkuat dampak penyampaian."
     )
@@ -457,209 +682,165 @@ def analyze_mbti(request: MbtiRequest):
     confidence = round(0.7 + (abs(e_score - i_score) + abs(s_score - n_score) + abs(t_score - f_score) + abs(j_score - p_score)) / 4.0, 2)
     confidence = max(0.70, min(0.98, confidence))
 
+    # Ambil SELURUH teks kandidat (semua transkrip = monolog kandidat)
+    full_transcript = " ".join([t.get('text', '') for t in transcripts if t.get('text')]).strip()
+    if not full_transcript:
+        full_transcript = "(Tidak ada pembicaraan terdeteksi)"
+
+    # Hitung total kata dan filler untuk dimasukkan ke prompt
+    total_words = sum(len(t.get('text', '').split()) for t in transcripts)
+
+    prompt = f"""
+    Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen.
+    
+    Anda sedang menganalisis rekaman video wawancara kerja di mana HANYA ADA SATU PEMBICARA, yaitu kandidat/pelamar kerja.
+    Tidak ada pewawancara dalam rekaman — kandidat berbicara sendiri (misalnya: video pitch diri, monolog self-introduction, atau jawaban atas pertanyaan yang sudah disiapkan sebelumnya).
+    
+    Berdasarkan data multimodal berikut, buatlah analisis mendalam tentang gaya karakter dan komunikasi kandidat.
+    JANGAN menyebutkan label singkatan MBTI (seperti ENFP, ISTJ, dll) secara langsung di dalam teks analisis.
+    Analisis harus ditulis dalam Bahasa Indonesia yang formal dan profesional.
+    
+    ═══════════════════════════════════════════
+    DATA MULTIMODAL KANDIDAT
+    ═══════════════════════════════════════════
+    - Estimasi Tipe Dasar: {predicted}
+    - Skor Dimensi Kepribadian: {scores}
+    - Kecepatan Bicara: {int(wpm)} WPM (kata per menit)
+    - Total Kata Diucapkan: {total_words} kata
+    - Filler Words Terdeteksi: {total_fillers} segmen dari {len(transcripts)} segmen total
+    - Rasio Filler Words: {filler_ratio:.2f}
+    - Intensitas Suara Rata-rata: {mean_intensity:.1f} dB
+    - Rasio Senyuman Wajah (Happy Expressions): {smile_ratio:.2f} ({int(smile_ratio*100)}%)
+    
+    ═══════════════════════════════════════════
+    TRANSKRIP LENGKAP KANDIDAT (monolog)
+    ═══════════════════════════════════════════
+    "{full_transcript}"
+    
+    ═══════════════════════════════════════════
+    TUGAS ANALISIS
+    ═══════════════════════════════════════════
+    1. Buat analisis mendalam (masing-masing 1-2 kalimat profesional) untuk SETIAP dimensi berikut di dalam objek JSON `reasoning`:
+       - E_I (Ekspresi Interpersonal): Jelaskan gaya komunikasi verbal/non-verbal kandidat (Komunikatif & Ekspresif vs Reflektif & Tenang) — kaitkan dengan data WPM, intensitas suara, DAN isi/gaya bicara dari transkrip.
+       - S_N (Fokus Informasi): Jelaskan bagaimana kandidat menangkap dan menyajikan informasi (Praktis & Berorientasi Fakta vs Konseptual & Strategis) — berdasarkan kata-kata dan topik konkret/abstrak yang diucapkan.
+       - T_F (Gaya Keputusan): Jelaskan cara kandidat mengambil keputusan dan menyampaikan pendapat (Logis & Objektif vs Empatis & Personal) — kaitkan dengan isi bicara, ekspresi wajah, dan pilihan kata.
+       - J_P (Gaya Kerja): Jelaskan bagaimana kandidat mengatur dan menyampaikan pikiran (Terstruktur & Rapi vs Adaptif & Spontan) — berdasarkan stabilitas tempo bicara dan frekuensi filler words.
+    
+    2. Berikan 3 rekomendasi perbaikan komunikasi yang sangat operasional, taktis, dan personal bagi kandidat (sebagai array `recommendations`).
+       Rekomendasi harus SPESIFIK dan langsung dapat dipraktikkan berdasarkan kelemahan nyata yang terdeteksi dari data di atas.
+    
+    3. Tulis `executive_summary` berupa ringkasan profesional mendalam (Bahasa Indonesia) yang WAJIB mencakup:
+       a. Topik utama dan hal-hal yang disampaikan oleh kandidat dalam monolognya (berdasarkan transkrip).
+       b. Gaya dan cara berbicara kandidat: kecepatan tempo WPM, intensitas vokal, ekspresi wajah, kelancaran bicara.
+       c. Karakter kepribadian kandidat secara keseluruhan beserta kekuatan dan kelemahan soft skill yang teridentifikasi.
+       d. Tingkat kesiapan kandidat untuk posisi yang dilamar.
+    
+    Jawablah dalam format JSON terstruktur yang valid sesuai schema MbtiResponse.
+    """
+
     api_key = os.environ.get("GEMINI_API_KEY")
+    groq_api_key = os.environ.get("GROQ_API_KEY")
     gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="GEMINI_API_KEY is not configured in the environment. It is required to generate the executive summary."
-        )
+    use_groq = bool(groq_api_key)
+    use_gemini = bool(api_key)
     
-    try:
-        print(f"🧠 Generating Gemini clinical MBTI reasoning & recommendations using {gemini_model}...")
-        client = genai.Client(api_key=api_key)
-        
-        prompt = f"""
-        Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen. Berdasarkan data multimodal kandidat berikut:
-        - Estimasi MBTI: {predicted}
-        - Skor Kepribadian: {scores}
-        - Kecepatan Vokal WPM: {int(wpm)} WPM
-        - Rasio Filler Words: {filler_ratio:.2f}
-        - Intensitas Suara Rata-rata: {mean_intensity:.1f} dB
-        - Rasio Senyuman Wajah: {smile_ratio:.2f}
-        
-        Tugas Anda adalah:
-        1. Buat kalimat analisis yang sangat mendalam (masing-masing 1 kalimat profesional) untuk dimensi:
-           - E_I: Extraversion vs Introversion
-           - S_N: Sensing vs Intuition
-           - T_F: Thinking vs Feeling
-           - J_P: Judging vs Perceiving
-        2. Berikan 3 poin rekomendasi perbaikan komunikasi/karier yang sangat operasional dan personal bagi kandidat (sebagai List of strings).
-        3. Tulis executive_summary berupa 3 kalimat profesional bahasa Indonesia yang mendalam mengenai rangkuman komunikasi, emosi, dan kecocokan soft skill kandidat.
-        
-        Jawablah dalam format JSON terstruktur yang valid sesuai schema MbtiResponse.
-        """
-        
-        response = client.models.generate_content(
-            model=gemini_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=MbtiResponse,
-                temperature=0.2
-            ),
-        )
-        
-        import json
-        data = json.loads(response.text)
+    if not use_groq and not use_gemini:
+        print("[Warning] Neither GEMINI_API_KEY nor GROQ_API_KEY is configured. Falling back to heuristic analysis.")
         return MbtiResponse(
             predicted_type=predicted,
             scores=scores,
             confidence=confidence,
-            reasoning=data.get("reasoning", reasoning),
-            recommendations=data.get("recommendations", default_recs),
-            executive_summary=data.get("executive_summary", default_summary)
+            reasoning=reasoning,
+            recommendations=default_recs,
+            executive_summary=default_summary
         )
-    except Exception as e:
-        print(f"❌ Gemini MBTI reasoning generation failed: {e}.")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Gemini MBTI reasoning generation failed: {str(e)}"
-        )
-
-@app.post("/analyze/dialogue", response_model=DialogueResponse)
-def analyze_dialogue(request: DialogueRequest):
-    api_key = os.environ.get("GEMINI_API_KEY")
     
-    if not api_key:
-        print("⚠️ GEMINI_API_KEY not found in environment. Falling back to advanced stateful heuristic dialogue classifier.")
-        classified = []
-        current_speaker = "interviewer"
-        
-        interviewer_pronouns = ["kamu", "anda", "lu", "dikau"]
-        candidate_pronouns = ["saya", "aku", "gue", "kami", "daku"]
-        
-        interviewer_actions = ["ceritakan", "jelaskan", "sebutkan", "bagaimana", "mengapa", "kenapa", "apakah", "bisa", "tolong", "silakan", "cv", "resume", "portofolio", "posisi", "lowongan", "perusahaan", "magang", "intern", "employee", "pekerjaan", "pengalaman", "gaji", "apply", "melamar"]
-        candidate_responses = ["jadi", "pertama", "sebelumnya", "pengalaman", "proyek", "bahasa", "framework", "kuliah", "jurusan", "belajar", "tertarik", "minat", "keahlian", "kemampuan", "menggunakan", "membuat", "membangun", "mengembangkan"]
-        
-        for idx, seg in enumerate(request.segments):
-            text_lower = seg.text.lower()
-            words = text_lower.split()
-            word_count = len(words)
+    if use_groq:
+        try:
+            print(f"[MBTI] Generating character reasoning & recommendations using Groq ({groq_model})...")
+            from groq import Groq
+            import json
             
-            is_question = "?" in seg.text or any(text_lower.startswith(q) for q in ["siapa", "apa", "kapan", "dimana", "mengapa", "bagaimana", "apakah", "kenapa", "gimana", "kok", "apakah"])
+            client = Groq(api_key=groq_api_key)
             
-            has_interviewer_pronouns = any(p in words for p in interviewer_pronouns)
-            has_candidate_pronouns = any(p in words for p in candidate_pronouns)
-            has_interviewer_actions = any(a in text_lower for a in interviewer_actions)
-            has_candidate_responses = any(r in text_lower for r in candidate_responses)
+            messages = [
+                {
+                    "role": "system", 
+                    "content": "Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen. Rekaman yang dianalisis hanya berisi suara kandidat (monolog/self-pitch), tidak ada pewawancara. Berikan respons dalam format JSON yang valid sesuai dengan skema output MbtiResponse."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
             
-            is_interviewer = False
+            completion = client.chat.completions.create(
+                model=groq_model,
+                messages=messages,
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
             
-            if idx == 0:
-                is_interviewer = True
-            elif is_question:
-                if has_candidate_pronouns and "tanya" in text_lower:
-                    is_interviewer = False
-                elif has_interviewer_pronouns or has_interviewer_actions:
-                    is_interviewer = True
-                elif word_count < 15:
-                    is_interviewer = True
-                else:
-                    is_interviewer = True
-            else:
-                if has_candidate_pronouns and word_count > 10:
-                    is_interviewer = False
-                elif has_interviewer_actions and not has_candidate_pronouns and word_count < 12:
-                    is_interviewer = True
-                elif word_count > 25:
-                    is_interviewer = False
-                else:
-                    is_interviewer = (current_speaker == "interviewer")
+            content_str = completion.choices[0].message.content
+            data = json.loads(content_str)
             
-            current_speaker = "interviewer" if is_interviewer else "candidate"
-            speech_act = "question" if is_question else ("answer" if current_speaker == "candidate" else "statement")
+            return MbtiResponse(
+                predicted_type=predicted,
+                scores=scores,
+                confidence=confidence,
+                reasoning=data.get("reasoning", reasoning),
+                recommendations=data.get("recommendations", default_recs),
+                executive_summary=data.get("executive_summary", default_summary)
+            )
+        except Exception as e:
+            print(f"[Error] Groq character analysis failed: {e}. Falling back...")
+            if not use_gemini:
+                return MbtiResponse(
+                    predicted_type=predicted,
+                    scores=scores,
+                    confidence=confidence,
+                    reasoning=reasoning,
+                    recommendations=default_recs,
+                    executive_summary=default_summary
+                )
+
+    if use_gemini:
+        try:
+            print(f"[MBTI] Generating Gemini character reasoning & recommendations using {gemini_model}...")
+            client = genai.Client(api_key=api_key)
             
-            classified.append(ClassifiedSegment(
-                index=seg.index,
-                speaker=current_speaker,
-                speech_act=speech_act
-            ))
-        return DialogueResponse(segments=classified)
-        
-    try:
-        client = genai.Client(api_key=api_key)
-        
-        segments_str = "\n".join([f"[{seg.index}] {seg.text}" for seg in request.segments])
-        
-        prompt = f"""
-        Anda adalah seorang ahli linguistik forensik dan psikolog rekrutmen profesional. Tugas Anda adalah menganalisis transkrip percakapan wawancara kerja terbagi berdasarkan segmen-segmen berikut, lalu membedakan pembicaranya antara Pewawancara (interviewer) dan Pelamar/Kandidat (candidate).
-        
-        Bahasa yang digunakan dalam wawancara ini sering kali tidak baku (informal/colloquial Indonesian), menggunakan slang, singkatan, partikel percakapan (seperti "sih", "kok", "lho", "kan", "deh"), kata ganti tidak baku ("gue", "lu", "aku", "kamu", "ente"), atau kata hubung tidak baku ("kalo", "yg", "aja", "nanya", "emang", "sebenernya").
-        
-        Data segmen transkrip berurutan:
-        {segments_str}
-        
-        Aturan Penting Pemahaman Konteks:
-        1. Bacalah SELURUH segmen dari awal sampai akhir secara berurutan untuk memahami ALUR percakapan secara utuh. Jangan menganalisis segmen secara terpisah!
-        2. Pewawancara (interviewer):
-           - Biasanya memulai sesi (perkenalan, menyapa, memberikan instruksi).
-           - Mengajukan pertanyaan tentang latar belakang, kelebihan, kekurangan, gaji, motivasi, proyek masa lalu.
-           - Memberikan tanggapan singkat ("oke", "baik", "menarik sekali") sebelum mengajukan pertanyaan berikutnya.
-        3. Pelamar/Kandidat (candidate):
-           - Menjawab pertanyaan dari pewawancara secara panjang lebar dan menjelaskan detail teknis atau pengalaman kerjanya.
-           - Terkadang kandidat bertanya balik di akhir sesi (misalnya menanyakan budaya kerja, kelanjutan proses, dsb.).
-        4. Tentukan pembicara (speaker): "interviewer" or "candidate".
-        5. Tentukan jenis tuturan (speech_act):
-           - "question": Jika segmen tersebut berupa pertanyaan atau mengandung kalimat tanya (baik dari pewawancara maupun kandidat).
-           - "answer": Jika segmen tersebut merupakan bagian dari jawaban atau penjelasan kandidat terhadap pertanyaan pewawancara.
-           - "statement": Jika berupa pernyataan umum, salam pembuka/penutup, feedback singkat, atau penjelasan yang bukan merupakan tanya-jawab langsung.
-        
-        Berikan jawaban dalam format JSON terstruktur yang valid sesuai dengan skema output.
-        """
-        
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=DialogueResponse,
-                temperature=0.15
-            ),
-        )
-        
-        import json
-        data = json.loads(response.text)
-        
-        classified = []
-        for seg in data.get("segments", []):
-            classified.append(ClassifiedSegment(
-                index=int(seg.get("index")),
-                speaker=seg.get("speaker"),
-                speech_act=seg.get("speech_act")
-            ))
-        return DialogueResponse(segments=classified)
-    except Exception as e:
-        print(f"❌ Gemini dialogue classification failed: {e}. Falling back to stateful heuristics.")
-        # Fallback to advanced stateful heuristic
-        classified = []
-        current_speaker = "interviewer"
-        
-        for idx, seg in enumerate(request.segments):
-            text_lower = seg.text.lower()
-            is_question = "?" in seg.text
+            response = client.models.generate_content(
+                model=gemini_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=MbtiResponse,
+                    temperature=0.2
+                ),
+            )
             
-            is_interviewer = False
-            if idx == 0:
-                is_interviewer = True
-            elif is_question:
-                is_interviewer = True
-            else:
-                if len(text_lower.split()) > 20:
-                    is_interviewer = False
-                else:
-                    is_interviewer = (current_speaker == "interviewer")
-            
-            current_speaker = "interviewer" if is_interviewer else "candidate"
-            speech_act = "question" if is_question else ("answer" if current_speaker == "candidate" else "statement")
-            
-            classified.append(ClassifiedSegment(
-                index=seg.index,
-                speaker=current_speaker,
-                speech_act=speech_act
-            ))
-        return DialogueResponse(segments=classified)
+            import json
+            data = json.loads(response.text)
+            return MbtiResponse(
+                predicted_type=predicted,
+                scores=scores,
+                confidence=confidence,
+                reasoning=data.get("reasoning", reasoning),
+                recommendations=data.get("recommendations", default_recs),
+                executive_summary=data.get("executive_summary", default_summary)
+            )
+        except Exception as e:
+            print(f"[Error] Gemini MBTI reasoning generation failed: {e}. Falling back to heuristic.")
+            return MbtiResponse(
+                predicted_type=predicted,
+                scores=scores,
+                confidence=confidence,
+                reasoning=reasoning,
+                recommendations=default_recs,
+                executive_summary=default_summary
+            )
 
 if __name__ == "__main__":
     import uvicorn

@@ -17,3 +17,4 @@ gdown==5.2.0
 # tensorflow-hub==0.16.1
 google-genai
 tf-keras
+groq

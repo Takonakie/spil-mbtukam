@@ -11,10 +11,14 @@ import { eq } from 'drizzle-orm';
 import { extractAudioFromVideo } from './audio.ts';
 import { VIDEOS_DIR, AUDIOS_DIR } from './storage.ts';
 import { join } from 'node:path';
+import fs from 'node:fs';
 
 const AI_SERVICE_BASE_URL = 'http://127.0.0.1:8000';
 
 export async function processInterviewPipeline(interviewId: string, videoFilename: string) {
+  let normalizedAudioPath: string | null = null;
+  let preprocessInputPath: string | null = null;
+
   console.log(`🚀 Starting pipeline for Interview ID: ${interviewId}`);
 
   const videoPath = join(VIDEOS_DIR, videoFilename);
@@ -33,12 +37,29 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
     // Determine file paths to send to AI microservice
     // Resilient fallback: if local extraction failed, we send the video path to audio analysis as well
     const expressionInputPath = videoPath;
-    const audioInputPath = hasExtracted ? audioPath : videoPath;
+    preprocessInputPath = hasExtracted ? audioPath : videoPath;
 
     if (hasExtracted) {
       await db.update(interviewsTable)
         .set({ audioUrl: audioPath, updatedAt: new Date() })
         .where(eq(interviewsTable.id, interviewId));
+    }
+
+    console.log('🎬 Calling Preprocess AI service to normalize audio...');
+    normalizedAudioPath = preprocessInputPath;
+    try {
+      const preprocessRes = await fetch(`${AI_SERVICE_BASE_URL}/analyze/preprocess`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file_path: preprocessInputPath })
+      }).then(r => {
+        if (!r.ok) throw new Error(`Preprocess AI service returned ${r.status}`);
+        return r.json();
+      }) as any;
+      normalizedAudioPath = preprocessRes.normalized_path;
+      console.log(`✅ Preprocessing completed. Normalized WAV: ${normalizedAudioPath}`);
+    } catch (err) {
+      console.error('⚠️ Preprocess service failed. Falling back to local/original path for subsequent steps:', err);
     }
 
     console.log('📡 Calling AI Microservices in parallel...');
@@ -56,7 +77,7 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       fetch(`${AI_SERVICE_BASE_URL}/analyze/transcript`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: audioInputPath })
+        body: JSON.stringify({ file_path: normalizedAudioPath })
       }).then(r => {
         if (!r.ok) throw new Error(`Transcript AI service returned ${r.status}`);
         return r.json();
@@ -64,7 +85,7 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       fetch(`${AI_SERVICE_BASE_URL}/analyze/audio`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: audioInputPath })
+        body: JSON.stringify({ file_path: normalizedAudioPath })
       }).then(r => {
         if (!r.ok) throw new Error(`Audio AI service returned ${r.status}`);
         return r.json();
@@ -86,19 +107,21 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
     }
 
     if (transRes.length > 0) {
+      // Rekaman hanya berisi suara kandidat (tidak ada pewawancara)
+      // Semua segmen transkrip langsung ditetapkan sebagai 'candidate'
       await db.insert(transcriptSegmentsTable).values(
-        transRes.map((item, index) => {
-          return {
-            interviewId,
-            startTime: item.start_time,
-            endTime: item.end_time,
-            text: item.text,
-            isFiller: item.is_filler,
-            fillerType: item.filler_type,
-            speaker: 'candidate',
-            speechAct: 'statement'
-          };
-        })
+        transRes.map((item: any) => ({
+          interviewId,
+          startTime: item.start_time,
+          endTime: item.end_time,
+          text: item.text,
+          isFiller: item.is_filler,
+          fillerType: item.filler_type,
+          fillerCount: item.filler_count || 0,
+          pauseBeforeSec: item.pause_before_sec || 0,
+          speaker: 'candidate',
+          speechAct: item.is_filler ? 'filler' : 'statement'
+        }))
       );
     }
 
@@ -184,24 +207,9 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       ? roundToTwo(Math.sqrt(validPitches.reduce((acc: number, cur: any) => acc + Math.pow(cur.pitch_hz - avgPitchHz, 2), 0) / (validPitches.length - 1)))
       : 0;
 
-    // Fluency & Fillers (Use all segments as the detection object)
+    // Fluency & Fillers — semua segmen = suara kandidat (tidak ada pewawancara)
     const candidateSegments = transRes;
-
-    const indonesianFillers = ["anu", "ehm", "ehh", "umm", "hmm", "gitu", "kayak", "jadi", "ya kan", "tuh", "nah", "kan", "sih", "kok", "deh"];
-    const englishFillers = ["um", "uh", "like", "you know", "basically", "actually", "literally", "so", "right", "well"];
-    const allFillers = [...indonesianFillers, ...englishFillers];
-
-    let fillerCount = 0;
-    candidateSegments.forEach(seg => {
-      const textLower = (seg.text || "").toLowerCase();
-      allFillers.forEach(filler => {
-        const regex = new RegExp(`\\b${filler.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'g');
-        const matches = textLower.match(regex);
-        if (matches) {
-          fillerCount += matches.length;
-        }
-      });
-    });
+    const fillerCount = candidateSegments.reduce((acc, seg) => acc + (seg.filler_count || 0), 0);
 
     const totalWordsCount = candidateSegments.reduce((acc, cur) => acc + (cur.text || '').split(/\s+/).filter(Boolean).length, 0);
     const fillerPercentage = totalWordsCount > 0
@@ -309,6 +317,18 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
       .set({ status: 'failed', updatedAt: new Date() })
       .where(eq(interviewsTable.id, interviewId))
       .catch(e => console.error('Failed to set interview status to failed:', e));
+  } finally {
+    // Clean up temporary normalized WAV file if created
+    if (normalizedAudioPath && preprocessInputPath && normalizedAudioPath !== preprocessInputPath) {
+      try {
+        if (fs.existsSync(normalizedAudioPath)) {
+          fs.unlinkSync(normalizedAudioPath);
+          console.log(`🗑️ Cleaned up temporary normalized WAV file: ${normalizedAudioPath}`);
+        }
+      } catch (cleanupErr) {
+        console.error(`⚠️ Failed to delete temporary WAV file: ${normalizedAudioPath}`, cleanupErr);
+      }
+    }
   }
 }
 
