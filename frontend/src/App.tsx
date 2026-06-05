@@ -478,13 +478,6 @@ export default function App() {
                           <div style={{ display: 'flex', gap: '12px' }}>
                   <button 
                     className="btn" 
-                    style={{ background: 'rgba(59, 130, 246, 0.1)', border: '1px solid rgba(59, 130, 246, 0.3)', color: '#3b82f6', boxShadow: 'none' }}
-                    onClick={() => window.print()}
-                  >
-                    🖨️ Cetak PDF
-                  </button>
-                  <button 
-                    className="btn" 
                     style={{ background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#ef4444', boxShadow: 'none' }}
                     onClick={async () => {
                       if (confirm('Hapus analisis kandidat ini?')) {
@@ -624,15 +617,15 @@ export default function App() {
                       {/* Gaya Komunikasi: Komunikatif vs Reflektif */}
                       <div className="mbti-bar-row-wrapper" style={{ marginBottom: '12px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.eScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Komunikatif/Ekspresif ({Math.round((detail.mbti?.eScore || 0) * 100)}%)</span>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.iScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Reflektif/Tenang ({Math.round((detail.mbti?.iScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.eScore || 0) >= 0.5 ? 700 : 500, color: 'var(--secondary)' }}>Komunikatif/Ekspresif ({Math.round((detail.mbti?.eScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.iScore || 0) > 0.5 ? 700 : 500, color: '#7c3aed' }}>Reflektif/Tenang ({Math.round((detail.mbti?.iScore || 0) * 100)}%)</span>
                         </div>
-                        <div className="mbti-progress-container" style={{ height: '8px' }}>
+                        <div className="mbti-progress-container" style={{ height: '8px', background: '#7c3aed', position: 'relative' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
                               width: `${(detail.mbti?.eScore || 0) * 100}%`,
-                              background: 'linear-gradient(90deg, var(--secondary), var(--primary))'
+                              background: 'var(--secondary)'
                             }} 
                           />
                         </div>
@@ -641,15 +634,15 @@ export default function App() {
                       {/* Fokus Informasi: Praktis vs Konseptual */}
                       <div className="mbti-bar-row-wrapper" style={{ marginBottom: '12px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.sScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Praktis/Faktual ({Math.round((detail.mbti?.sScore || 0) * 100)}%)</span>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.nScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Konseptual/Strategis ({Math.round((detail.mbti?.nScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.sScore || 0) >= 0.5 ? 700 : 500, color: 'var(--secondary)' }}>Praktis/Faktual ({Math.round((detail.mbti?.sScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.nScore || 0) > 0.5 ? 700 : 500, color: '#7c3aed' }}>Konseptual/Strategis ({Math.round((detail.mbti?.nScore || 0) * 100)}%)</span>
                         </div>
-                        <div className="mbti-progress-container" style={{ height: '8px' }}>
+                        <div className="mbti-progress-container" style={{ height: '8px', background: '#7c3aed', position: 'relative' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
                               width: `${(detail.mbti?.sScore || 0) * 100}%`,
-                              background: 'linear-gradient(90deg, var(--secondary), var(--primary))'
+                              background: 'var(--secondary)'
                             }} 
                           />
                         </div>
@@ -658,15 +651,15 @@ export default function App() {
                       {/* Gaya Keputusan: Logis vs Empatis */}
                       <div className="mbti-bar-row-wrapper" style={{ marginBottom: '12px' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.tScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Logis/Objektif ({Math.round((detail.mbti?.tScore || 0) * 100)}%)</span>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.fScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Empatis/Personal ({Math.round((detail.mbti?.fScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.tScore || 0) >= 0.5 ? 700 : 500, color: 'var(--secondary)' }}>Logis/Objektif ({Math.round((detail.mbti?.tScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.fScore || 0) > 0.5 ? 700 : 500, color: '#7c3aed' }}>Empatis/Personal ({Math.round((detail.mbti?.fScore || 0) * 100)}%)</span>
                         </div>
-                        <div className="mbti-progress-container" style={{ height: '8px' }}>
+                        <div className="mbti-progress-container" style={{ height: '8px', background: '#7c3aed', position: 'relative' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
                               width: `${(detail.mbti?.tScore || 0) * 100}%`,
-                              background: 'linear-gradient(90deg, var(--secondary), var(--primary))'
+                              background: 'var(--secondary)'
                             }} 
                           />
                         </div>
@@ -675,15 +668,15 @@ export default function App() {
                       {/* Gaya Kerja: Terstruktur vs Adaptif */}
                       <div className="mbti-bar-row-wrapper">
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.jScore || 0) > 0.5 ? 'var(--secondary)' : 'var(--text-muted)' }}>Terstruktur/Terencana ({Math.round((detail.mbti?.jScore || 0) * 100)}%)</span>
-                          <span style={{ fontWeight: 600, color: (detail.mbti?.pScore || 0) > 0.5 ? 'var(--primary)' : 'var(--text-muted)' }}>Adaptif/Spontan ({Math.round((detail.mbti?.pScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.jScore || 0) >= 0.5 ? 700 : 500, color: 'var(--secondary)' }}>Terstruktur/Terencana ({Math.round((detail.mbti?.jScore || 0) * 100)}%)</span>
+                          <span style={{ fontWeight: (detail.mbti?.pScore || 0) > 0.5 ? 700 : 500, color: '#7c3aed' }}>Adaptif/Spontan ({Math.round((detail.mbti?.pScore || 0) * 100)}%)</span>
                         </div>
-                        <div className="mbti-progress-container" style={{ height: '8px' }}>
+                        <div className="mbti-progress-container" style={{ height: '8px', background: '#7c3aed', position: 'relative' }}>
                           <div 
                             className="mbti-progress-bar" 
                             style={{ 
                               width: `${(detail.mbti?.jScore || 0) * 100}%`,
-                              background: 'linear-gradient(90deg, var(--secondary), var(--primary))'
+                              background: 'var(--secondary)'
                             }} 
                           />
                         </div>
@@ -795,9 +788,7 @@ export default function App() {
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '16px',
-                          padding: '10px 0',
-                          maxHeight: '600px',
-                          overflowY: 'auto'
+                          padding: '10px 0'
                         }}>
                           {transcripts.length === 0 ? (
                             <p style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center' }}>Tidak ada data transkrip.</p>
@@ -948,7 +939,16 @@ export default function App() {
                               <h4 style={{ color: '#fff', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>Visualisasi Pitch & Intensitas Suara</h4>
                               {(() => {
                                 const validVoices = voices.filter(v => v.pitchHz !== null && v.pitchHz > 0);
-                                                               const maxPitch = Math.max(...validVoices.map(v => v.pitchHz || 0), 200);
+                                const validIntensities = voices.filter(v => v.intensityDb !== null && v.intensityDb > 0);
+                                
+                                const avgPitch = validVoices.length > 0 
+                                  ? Math.round(validVoices.reduce((acc, v) => acc + (v.pitchHz || 0), 0) / validVoices.length)
+                                  : 0;
+                                const avgIntensity = validIntensities.length > 0 
+                                  ? Math.round(validIntensities.reduce((acc, v) => acc + (v.intensityDb || 0), 0) / validIntensities.length)
+                                  : 0;
+
+                                const maxPitch = Math.max(...validVoices.map(v => v.pitchHz || 0), 200);
                                 const maxIntensity = Math.max(...voices.map(v => v.intensityDb || 0), 80);
                                 const width = 800;
                                 const height = 150;
@@ -968,28 +968,42 @@ export default function App() {
                                 });
                                 
                                 return (
-                                  <div style={{ position: 'relative', width: '100%', overflowX: 'auto' }}>
-                                    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
-                                      {validVoices.length > 1 && (
-                                        <path
-                                          d={`M ${pitchPoints.join(' L ')}`}
-                                          fill="none"
-                                          stroke="#22d3ee"
-                                          strokeWidth="2.5"
-                                        />
-                                      )}
-                                      {voices.length > 1 && (
-                                        <path
-                                          d={`M ${intensityPoints.join(' L ')}`}
-                                          fill="none"
-                                          stroke="#c084fc"
-                                          strokeWidth="2"
-                                          strokeDasharray="4 3"
-                                        />
-                                      )}
-                                      <text x="20" y="20" fill="#22d3ee" fontSize="11" fontWeight="bold">● Pitch (Hz)</text>
-                                      <text x="120" y="20" fill="#c084fc" fontSize="11" fontWeight="bold">- - Intensitas (dB)</text>
-                                    </svg>
+                                  <div>
+                                    {/* Display averages */}
+                                    <div style={{ display: 'flex', gap: '20px', marginBottom: '15px', background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: '8px', border: '1px solid var(--border-color)', width: 'fit-content' }}>
+                                      <div>
+                                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Rata-rata Pitch</span>
+                                        <strong style={{ fontSize: '18px', color: '#22d3ee' }}>{avgPitch} Hz</strong>
+                                      </div>
+                                      <div style={{ borderLeft: '1px solid var(--border-color)', paddingLeft: '20px' }}>
+                                        <span style={{ fontSize: '11px', color: 'var(--text-secondary)', display: 'block', textTransform: 'uppercase', fontWeight: 600 }}>Rata-rata Intensitas</span>
+                                        <strong style={{ fontSize: '18px', color: '#c084fc' }}>{avgIntensity} dB</strong>
+                                      </div>
+                                    </div>
+
+                                    <div style={{ position: 'relative', width: '100%', overflowX: 'auto' }}>
+                                      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '8px' }}>
+                                        {validVoices.length > 1 && (
+                                          <path
+                                            d={`M ${pitchPoints.join(' L ')}`}
+                                            fill="none"
+                                            stroke="#22d3ee"
+                                            strokeWidth="2.5"
+                                          />
+                                        )}
+                                        {voices.length > 1 && (
+                                          <path
+                                            d={`M ${intensityPoints.join(' L ')}`}
+                                            fill="none"
+                                            stroke="#c084fc"
+                                            strokeWidth="2"
+                                            strokeDasharray="4 3"
+                                          />
+                                        )}
+                                        <text x="20" y="20" fill="#22d3ee" fontSize="11" fontWeight="bold">● Pitch (Hz)</text>
+                                        <text x="120" y="20" fill="#c084fc" fontSize="11" fontWeight="bold">- - Intensitas (dB)</text>
+                                      </svg>
+                                    </div>
                                   </div>
                                 );
                               })()}

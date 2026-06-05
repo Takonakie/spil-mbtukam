@@ -12,8 +12,53 @@ import { extractAudioFromVideo } from './audio.ts';
 import { VIDEOS_DIR, AUDIOS_DIR } from './storage.ts';
 import { join } from 'node:path';
 import fs from 'node:fs';
+import http from 'node:http';
 
 const AI_SERVICE_BASE_URL = 'http://127.0.0.1:8000';
+
+// Custom HTTP POST JSON helper to bypass undici/fetch timeout limitations
+function postJson(urlStr: string, body: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlStr);
+    const postData = JSON.stringify(body);
+    
+    const req = http.request({
+      hostname: url.hostname,
+      port: url.port,
+      path: url.pathname,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout: 600000 // 10 minutes timeout
+    }, (res) => {
+      if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) {
+        reject(new Error(`Service returned status ${res.statusCode}`));
+        return;
+      }
+      
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(data));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    
+    req.on('error', (err) => { reject(err); });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Request timed out'));
+    });
+    
+    req.write(postData);
+    req.end();
+  });
+}
 
 export async function processInterviewPipeline(interviewId: string, videoFilename: string) {
   let normalizedAudioPath: string | null = null;
@@ -48,13 +93,8 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
     console.log('🎬 Calling Preprocess AI service to normalize audio...');
     normalizedAudioPath = preprocessInputPath;
     try {
-      const preprocessRes = await fetch(`${AI_SERVICE_BASE_URL}/analyze/preprocess`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: preprocessInputPath })
-      }).then(r => {
-        if (!r.ok) throw new Error(`Preprocess AI service returned ${r.status}`);
-        return r.json();
+      const preprocessRes = await postJson(`${AI_SERVICE_BASE_URL}/analyze/preprocess`, {
+        file_path: preprocessInputPath
       }) as any;
       normalizedAudioPath = preprocessRes.normalized_path;
       console.log(`✅ Preprocessing completed. Normalized WAV: ${normalizedAudioPath}`);
@@ -66,30 +106,9 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
 
     // 3. Dispatch parallel AI service calls
     const [exprRes, transRes, audioRes] = await Promise.all([
-      fetch(`${AI_SERVICE_BASE_URL}/analyze/expression`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: expressionInputPath })
-      }).then(r => {
-        if (!r.ok) throw new Error(`Expression AI service returned ${r.status}`);
-        return r.json();
-      }),
-      fetch(`${AI_SERVICE_BASE_URL}/analyze/transcript`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: normalizedAudioPath })
-      }).then(r => {
-        if (!r.ok) throw new Error(`Transcript AI service returned ${r.status}`);
-        return r.json();
-      }),
-      fetch(`${AI_SERVICE_BASE_URL}/analyze/audio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ file_path: normalizedAudioPath })
-      }).then(r => {
-        if (!r.ok) throw new Error(`Audio AI service returned ${r.status}`);
-        return r.json();
-      })
+      postJson(`${AI_SERVICE_BASE_URL}/analyze/expression`, { file_path: expressionInputPath }),
+      postJson(`${AI_SERVICE_BASE_URL}/analyze/transcript`, { file_path: normalizedAudioPath }),
+      postJson(`${AI_SERVICE_BASE_URL}/analyze/audio`, { file_path: normalizedAudioPath })
     ]) as [any[], any[], any];
 
     console.log('💾 Saving AI analysis results to PostgreSQL...');
@@ -143,17 +162,10 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
     console.log('🧠 Call MBTI Estimation Engine...');
 
     // 5. Send aggregated data to MBTI service
-    const mbtiRes = await fetch(`${AI_SERVICE_BASE_URL}/analyze/mbti`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        expression_data: exprRes,
-        voice_data: audioRes.pitch_data,
-        transcript_data: transRes
-      })
-    }).then(r => {
-      if (!r.ok) throw new Error(`MBTI AI service returned ${r.status}`);
-      return r.json();
+    const mbtiRes = await postJson(`${AI_SERVICE_BASE_URL}/analyze/mbti`, {
+      expression_data: exprRes,
+      voice_data: audioRes.pitch_data,
+      transcript_data: transRes
     }) as any;
 
     // 6. Save MBTI Result
@@ -220,12 +232,12 @@ export async function processInterviewPipeline(interviewId: string, videoFilenam
     const firstSegment = transRes[0];
     const lastSegment = transRes[transRes.length - 1];
     const estimatedDuration = lastSegment ? lastSegment.end_time - (firstSegment ? firstSegment.start_time : 0) : 10;
-    
+
     // Calculate candidate speaking active duration
     const firstCandidateSeg = candidateSegments[0];
     const lastCandidateSeg = candidateSegments[candidateSegments.length - 1];
-    const candidateDuration = lastCandidateSeg 
-      ? lastCandidateSeg.end_time - (firstCandidateSeg ? firstCandidateSeg.start_time : 0) 
+    const candidateDuration = lastCandidateSeg
+      ? lastCandidateSeg.end_time - (firstCandidateSeg ? firstCandidateSeg.start_time : 0)
       : estimatedDuration;
     const candidateDurationMin = candidateDuration / 60;
     const speakingRateWpm = candidateDurationMin > 0 ? roundToTwo(totalWordsCount / candidateDurationMin) : 0;

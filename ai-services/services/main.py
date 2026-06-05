@@ -23,8 +23,6 @@ for path in [
 ]:
     if os.path.exists(path):
         load_dotenv(dotenv_path=path)
-from google import genai
-from google.genai import types
 import cv2
 import whisper
 import parselmouth
@@ -288,21 +286,7 @@ def analyze_transcript(request: AnalyzeRequest):
         except Exception as e:
             print(f"[Warning] Preprocessing failed in transcript analysis: {e}. Using original file.")
             
-    # Contextual disfluency lexicons
-    indonesian_fillers = [
-        # Vokal hesitation
-        "eh", "ehm", "ehem", "ehh", "em", "emm", "emh", "um", "umm", "uhm", "hmm", "hm",
-        # Particle discourse markers  
-        "anu", "gitu", "gitu lho", "gitu kan", "gitu deh",
-        "kayak", "kayaknya", "kaya", "kayanya",
-        "ya kan", "ya", "ya gitu", "yah",
-        "nah", "nah gitu", "tuh", "tuh kan",
-        "kan", "sih", "kok", "deh", "dong", "lho", "lah",
-        # Stalling phrases
-        "jadi", "jadi gini", "jadi kayak", "jadi ya",
-        "sebenarnya", "sebenernya", "gimana ya", "apa ya", "apa namanya",
-        "pokoknya", "intinya", "maksudnya", "artinya"
-    ]
+    indonesian_fillers = ["anu", "ehm", "ehh", "umm", "hmm", "gitu", "kayak", "jadi", "ya kan", "tuh", "nah", "kan", "sih", "kok", "deh",  "eh", "ehem", "em", "emm", "emh", "um", "uhm", "hm"]
     english_fillers = ["um", "uh", "like", "you know", "basically", "actually", "literally", "so", "right", "well"]
     all_fillers = indonesian_fillers + english_fillers
     
@@ -340,9 +324,9 @@ def analyze_transcript(request: AnalyzeRequest):
                     start_time=round(prev_end, 2),
                     end_time=round(curr_start, 2),
                     text="[Jeda]",
-                    is_filler=True,
+                    is_filler=False,
                     filler_type="pause",
-                    filler_count=1,
+                    filler_count=0,
                     pause_before_sec=round(gap_before, 2)
                 ))
                 
@@ -361,11 +345,6 @@ def analyze_transcript(request: AnalyzeRequest):
                     if w_curr_start - w_prev_end >= 0.8:
                         intra_segment_pauses += 1
                         
-            if intra_segment_pauses > 0:
-                f_count += intra_segment_pauses
-                if not first_f:
-                    first_f = "pause"
-                    
             is_filler = (f_count > 0)
             
             segments.append(TranscriptSegment(
@@ -573,8 +552,9 @@ def analyze_mbti(request: MbtiRequest):
         start_time = transcripts[0].get('start_time', 0.0)
         end_time = transcripts[-1].get('end_time', 10.0)
         for t in transcripts:
-            if not t.get('is_filler', False):
-                words += len(t.get('text', '').split())
+            txt = t.get('text', '')
+            if txt and not txt.startswith('['):
+                words += len(txt.split())
                 
     duration_min = max(0.1, (end_time - start_time) / 60.0)
     wpm = words / duration_min
@@ -738,16 +718,13 @@ def analyze_mbti(request: MbtiRequest):
     Jawablah dalam format JSON terstruktur yang valid sesuai schema MbtiResponse.
     """
 
-    api_key = os.environ.get("GEMINI_API_KEY")
     groq_api_key = os.environ.get("GROQ_API_KEY")
-    gemini_model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
-    groq_model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+    groq_model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
     
     use_groq = bool(groq_api_key)
-    use_gemini = bool(api_key)
     
-    if not use_groq and not use_gemini:
-        print("[Warning] Neither GEMINI_API_KEY nor GROQ_API_KEY is configured. Falling back to heuristic analysis.")
+    if not use_groq:
+        print("[Warning] GROQ_API_KEY is not configured. Falling back to heuristic analysis.")
         return MbtiResponse(
             predicted_type=predicted,
             scores=scores,
@@ -757,90 +734,52 @@ def analyze_mbti(request: MbtiRequest):
             executive_summary=default_summary
         )
     
-    if use_groq:
-        try:
-            print(f"[MBTI] Generating character reasoning & recommendations using Groq ({groq_model})...")
-            from groq import Groq
-            import json
-            
-            client = Groq(api_key=groq_api_key)
-            
-            messages = [
-                {
-                    "role": "system", 
-                    "content": "Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen. Rekaman yang dianalisis hanya berisi suara kandidat (monolog/self-pitch), tidak ada pewawancara. Berikan respons dalam format JSON yang valid sesuai dengan skema output MbtiResponse."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-            
-            completion = client.chat.completions.create(
-                model=groq_model,
-                messages=messages,
-                temperature=0.2,
-                response_format={"type": "json_object"}
-            )
-            
-            content_str = completion.choices[0].message.content
-            data = json.loads(content_str)
-            
-            return MbtiResponse(
-                predicted_type=predicted,
-                scores=scores,
-                confidence=confidence,
-                reasoning=data.get("reasoning", reasoning),
-                recommendations=data.get("recommendations", default_recs),
-                executive_summary=data.get("executive_summary", default_summary)
-            )
-        except Exception as e:
-            print(f"[Error] Groq character analysis failed: {e}. Falling back...")
-            if not use_gemini:
-                return MbtiResponse(
-                    predicted_type=predicted,
-                    scores=scores,
-                    confidence=confidence,
-                    reasoning=reasoning,
-                    recommendations=default_recs,
-                    executive_summary=default_summary
-                )
-
-    if use_gemini:
-        try:
-            print(f"[MBTI] Generating Gemini character reasoning & recommendations using {gemini_model}...")
-            client = genai.Client(api_key=api_key)
-            
-            response = client.models.generate_content(
-                model=gemini_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=MbtiResponse,
-                    temperature=0.2
-                ),
-            )
-            
-            import json
-            data = json.loads(response.text)
-            return MbtiResponse(
-                predicted_type=predicted,
-                scores=scores,
-                confidence=confidence,
-                reasoning=data.get("reasoning", reasoning),
-                recommendations=data.get("recommendations", default_recs),
-                executive_summary=data.get("executive_summary", default_summary)
-            )
-        except Exception as e:
-            print(f"[Error] Gemini MBTI reasoning generation failed: {e}. Falling back to heuristic.")
-            return MbtiResponse(
-                predicted_type=predicted,
-                scores=scores,
-                confidence=confidence,
-                reasoning=reasoning,
-                recommendations=default_recs,
-                executive_summary=default_summary
-            )
+    try:
+        print(f"[MBTI] Generating character reasoning & recommendations using Groq ({groq_model})...")
+        from groq import Groq
+        import json
+        
+        client = Groq(api_key=groq_api_key)
+        
+        messages = [
+            {
+                "role": "system", 
+                "content": "Anda adalah seorang Psikolog Industri dan Organisasi profesional ahli rekrutmen. Rekaman yang dianalisis hanya berisi suara kandidat (monolog/self-pitch), tidak ada pewawancara. Berikan respons dalam format JSON yang valid sesuai dengan skema output MbtiResponse."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+        
+        completion = client.chat.completions.create(
+            model=groq_model,
+            messages=messages,
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
+        
+        content_str = completion.choices[0].message.content
+        data = json.loads(content_str)
+        
+        return MbtiResponse(
+            predicted_type=predicted,
+            scores=scores,
+            confidence=confidence,
+            reasoning=data.get("reasoning", reasoning),
+            recommendations=data.get("recommendations", default_recs),
+            executive_summary=data.get("executive_summary", default_summary)
+        )
+    except Exception as e:
+        print(f"[Error] Groq character analysis failed: {e}. Falling back to heuristic.")
+        return MbtiResponse(
+            predicted_type=predicted,
+            scores=scores,
+            confidence=confidence,
+            reasoning=reasoning,
+            recommendations=default_recs,
+            executive_summary=default_summary
+        )
 
 if __name__ == "__main__":
     import uvicorn
